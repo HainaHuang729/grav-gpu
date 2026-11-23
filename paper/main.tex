@@ -1,0 +1,246 @@
+\documentclass[aps,prd,reprint,superscriptaddress,nofootinbib,amsmath,amssymb,floatfix,longbibliography]{revtex4-2}
+\usepackage[T1]{fontenc}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\graphicspath{{figures/}}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\manuscripttitle}{Multi-GPU VRAM-Resident TreePM Gravity Solver for Billion-Particle Cosmological \textit{N}-Body Simulations}
+\hypersetup{pdftitle={Multi-GPU VRAM-Resident TreePM Gravity Solver for Billion-Particle Cosmological N-Body Simulations},pdfauthor={Haina Huang}}
+
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\topfraction}{0.92}
+\renewcommand{\bottomfraction}{0.92}
+\renewcommand{\floatpagefraction}{0.85}
+
+\newcommand{\figwide}[3]{%
+  \begin{figure*}[!tbp]
+    \centering
+    \includegraphics[width=168mm]{#1}
+    \caption{#2}\label{#3}
+  \end{figure*}%
+}
+
+\begin{document}
+\title{\manuscripttitle}
+\author{Haina Huang}
+\affiliation{Department of Physics, The Chinese University of Hong Kong, Shatin, Hong Kong, China}
+\date{November 23, 2026}
+
+\begin{abstract}
+We present \texttt{swift-treepm-gpu}, a multi-GPU CUDA TreePM and Fast Multipole Method (FMM) gravity solver designed to keep billion-particle ($1024^3 = 1{,}073{,}741{,}824$) cosmological dark-matter simulations fully resident inside device VRAM across $G \in \{1, 2, 3, 4, 6\}$ GPUs with zero host-device particle swapping during time integration. Partitioning the periodic domain into 12 slab-resident octree zones with cyclic axis-and-offset load balancing, dual-stream particle migration, neighbor ghost-tree sharing, and a resident $128^3$ cuFFT particle-mesh solver, (GPUs~\texttt{0..3}) retain $139.7$--$142.4\,\mathrm{GB}$ of state in VRAM while preserving $4.86\,\mathrm{GB}$ minimum free headroom at $z=0$ and $12.31\,\mathrm{GB}$ at $z=1.758$. On dual-socket AMD EPYC PCIe hosts, we identify and resolve a deadlock when direct CUDA peer-to-peer (P2P) access crosses PCIe host bridges (\texttt{NODE} topology) at $1024^3$; restricting hardware P2P to NVLink-connected pairs (\texttt{SWIFT\_P2P\_MODE=nvlink}, native-atomic gated) with pinned-host staging across bridge boundaries achieves a $2.40\times$ multi-GPU speedup over single-GPU slab-resident execution and a $1.30\times$ gain over single-NVLink topologies. Against a 256-core archival CPU SWIFT production run ($\Lambda$CDM, $L = 25\,h^{-1}\,\mathrm{Mpc}$), four RTX A6000 GPUs deliver pure-evolution speedups of $7.26\times$ at $z = 0.063 \rightarrow 0$ ($4{,}388.62\,\mathrm{s}$ vs.\ $31{,}878.77\,\mathrm{s}$) and $9.27\times$ solo ($7.46\times$ shared node) at $z = 2.033 \rightarrow 1.758$ ($3{,}510.98\,\mathrm{s}$ vs.\ $32{,}538.37\,\mathrm{s}$). Across $k \in [0.3, 16]\,h\,\mathrm{Mpc}^{-1}$, GPU matter power spectra $P_\delta(k)$ agree with CPU SWIFT to $0.00453\%$ at $z=0$ and $0.01019\%$ at $z=1.758$ ($\min r \ge 0.99999995$), synchronized momentum divergence spectra $P_\theta(k)$ match to $0.0111\%$--$0.0405\%$ after accounting for leapfrog kick-synchronization conventions across intermediate versus final dumps, and standalone native SWIFT Friends-of-Friends halo counts ($N \ge 32\text{--}65{,}536$) agree within $\pm 0.32\%$. Calibrated against all $20{,}194$ steps of the archival CPU log ($304.48\,\mathrm{h}$ pure gravity, $322.66\,\mathrm{h}$ total), full $z = 200 \rightarrow 0$ evolution on four RTX A6000 GPUs projects to $34.6$--$35.8\,\mathrm{h}$ ($8.50$--$8.80\times$ speedup) and $28.3$--$29.2\,\mathrm{kWh}$ whole-node energy ($\approx 86\%$ savings relative to $213.1\,\mathrm{kWh}$ on the 256-core CPU node).
+\end{abstract}
+
+\maketitle
+
+\section{Introduction}\label{sec:intro}
+
+Cosmological $N$-body simulations remain the foundational numerical laboratory for nonlinear structure formation, halo mass functions, and precision summary statistics required by Stage-IV dark-energy and large-scale-structure surveys. Modern hybrid gravity solvers combine a fast Fourier particle-mesh (PM) long-range force on coarse grids~\citep{Hockney1988} with hierarchical spatial decompositions---either Barnes--Hut multipole trees or Cartesian Fast Multipole Methods (FMM)~\citep{Dehnen2000FMM,Dehnen2014FMM}---as implemented in flagship CPU and GPU-accelerated production codes including \texttt{GADGET-2}~\citep{Springel2005GADGET2}, \texttt{GADGET-4}~\citep{Springel2021GADGET4}, \texttt{PKDGRAV3}~\citep{Potter2017PKDGRAV3}, \texttt{HACC}~\citep{Habib2016HACC}, \texttt{ABACUS}~\citep{Garrison2021ABACUS}, and task-based \texttt{SWIFT}~\citep{Schaller2024SWIFT}.
+
+While GPU kernels dramatically accelerate short-range P2P/M2L/M2P force evaluations, scaling to $N = 1024^3 \approx 1.074 \times 10^9$ particles on multi-GPU nodes encounters a sharp memory-and-interconnect wall. Storing particle coordinates, velocities, accelerations, time-bin states, radix octree geometry, multipoles, work pools, and long-range PM buffers for $10^9+$ particles requires $\approx 140\,\mathrm{GB}$ of live state, exceeding the $48\,\mathrm{GiB}$ capacity of an individual workstation or cluster GPU such as the NVIDIA RTX A6000. Single-GPU time-slicing or host-streaming engines resolve capacity by swapping particle slabs over PCIe every timestep, which exposes host-device memory bandwidth bottlenecks whenever active particle fractions or neighbor ghost traffic grow. Conversely, naive multi-GPU distribution can introduce tree-walk divergence, dynamic memory exhaustion under late-time gravitational clustering ($z \rightarrow 0$), or peer-to-peer (P2P) hangs across non-uniform PCIe root-complex topologies.
+
+In this work, we eliminate host particle swapping entirely at $1024^3$ while scaling across multiple GPUs inside a single node. Our solver, \texttt{swift-treepm-gpu} (\texttt{multi\_gpu\_slab.cu}), partitions the periodic simulation volume into 12 contiguous slab domains distributed evenly across $G \in \{1, 2, 3, 4, 6\}$ GPUs so every particle, tree node, and PM array remains resident in device VRAM throughout the entire cosmological integration. Crucially, we preserve exact algorithmic parity with \texttt{SWIFT}'s cosmology, Plummer force softening, dynamic power-of-two PM timestep hierarchy, and leapfrog kick-drift-kick integrator, enabling one-to-one validation against a full archival 256-core CPU \texttt{SWIFT} simulation at both mid-redshift ($z \approx 2$) and $z = 0$.
+
+The remainder of this paper is organized as follows. Section~\ref{sec:arch} describes the multi-GPU 12-slab VRAM-resident architecture, cyclic load balancing, NVLink vs.\ PCIe \texttt{NODE} ghost exchange, and resident cuFFT PM integration. Section~\ref{sec:bench} specifies our benchmark cosmology, archival CPU reference dataset, and accuracy metrics. Section~\ref{sec:perf} reports Gate~1 ($256^3$) strong scaling, interconnect topology ablations, and $1024^3$ runtime and VRAM balance. Section~\ref{sec:valid} presents end-to-end $1024^3$ accuracy validation across matter density spectra, kick-aligned momentum divergence spectra, and native \texttt{SWIFT} Friends-of-Friends (FoF) halo catalogues. Section~\ref{sec:history} calibrates a six-epoch, $20{,}194$-step full-history scaling and energy model from $z = 200 \rightarrow 0$ and $z = 50 \rightarrow 0$, and Section~\ref{sec:conc} concludes with software availability.
+
+\section{Multi-GPU VRAM-Resident 12-Slab Architecture}\label{sec:arch}
+
+\figwide{fig1_architecture.pdf}{Architecture of the multi-GPU VRAM-resident 12-slab TreePM engine on the $4 \times \text{RTX A6000}$ node \texttt{a9}. Twelve periodic $Y$-slabs (3 slabs per GPU) remain continuously resident in GPU VRAM with zero host particle swaps across timesteps. Intra-island ghost trees and slab migrants transfer directly over NVLink4 (\texttt{GPUs 0$\leftrightarrow$1} and \texttt{2$\leftrightarrow$3}, \texttt{can\_peer=1}), whereas cross-bridge exchanges between \texttt{GPU 1} and \texttt{GPU 2} (and periodic wrap \texttt{0$\leftrightarrow$11}) traverse pinned host staging (\texttt{SWIFT\_P2P\_MODE=nvlink}), bypassing the $1024^3$ \texttt{NODE} PCIe P2P deadlock observed under \texttt{SWIFT\_P2P\_MODE=all}.}{fig:arch}
+
+\subsection{Cyclic Slab Domain Decomposition and Memory Plan}
+
+To fit $1024^3$ particles cleanly across $4 \times 48\,\mathrm{GiB}$ GPUs without exceeding any device's $50.90\,\mathrm{GB}$ ($49{,}140\,\mathrm{MiB}$) ceiling even under strong nonlinear clustering at $z=0$, \texttt{multi\_gpu\_slab.cu} divides the periodic box along one Cartesian axis into $N_s = 12$ uniform slabs of width $L/12$, assigning $12/G$ contiguous slabs per GPU. Before allocating device buffers, Pass~1 streams the binary initial-state coordinates in $16\mathrm{M}$-particle chunks, builds slab histograms along all three coordinate axes ($x, y, z$), and searches all $3 \times 12$ cyclic \texttt{(axis, offset)} pairs to minimize the maximum particle count on any single GPU:
+\begin{equation}
+  (a^*, o^*) = \arg\min_{(a,o)} \left( \max_{0 \le g < G} \sum_{\ell=0}^{N_s/G - 1} N_{a, (o + g N_s/G + \ell)\bmod 12} \right),
+\end{equation}
+breaking ties by minimum peak single-slab count without modifying particle coordinates. On our $L = 25\,h^{-1}\mathrm{Mpc}$ cosmological box at both $z = 2.033$ and $z = 0.063$, Pass~1 automatically selects \texttt{slab\_axis = 1} ($Y$-axis) and \texttt{slab\_offset = 2}.
+
+Simultaneously, Pass~1 detects uniform particle mass (\texttt{uniform\_mass = true} for dark-matter-only runs), eliding per-particle mass arrays from VRAM. Each slab allocates persistent device arrays for particle positions (\texttt{double3}), velocities (\texttt{float3}), old accelerations, time-bin tags, mesh accelerations (\texttt{float3}), sorted particle permutations, radix-tree geometry, and multipoles, sized with a conservative growth factor (\texttt{1.04} slab capacity slack for $N > 5 \times 10^7$ plus dedicated node and CUB sort-scratch pools). Thread-safe phase-pool guards (\texttt{omp critical(phase\_pool\_alloc)}) prevent concurrent OpenMP host threads from racing during per-GPU workspace initialization. Under this plan at $1024^3$ across $G=4$ GPUs, total allocated device memory is $139.69\,\mathrm{GB}$ at $z = 1.758$ (minimum free VRAM $12.31\,\mathrm{GB}$) and $142.40\,\mathrm{GB}$ at $z = 0$ (minimum free VRAM $4.86\,\mathrm{GB}$ on the densest cluster-bearing GPU~2 hosting $348.2\mathrm{M}$ particles), achieving zero host swaps over hundreds of timesteps.
+
+\subsection{Resident Octree, Ghost Exchange, and Interconnect Topology}
+
+Within each timestep, OpenMP host threads orchestrate the 4 GPUs through six pipelined phases (Fig.~\ref{fig:arch}):
+\begin{enumerate}
+  \item \textit{Drift and Dual-Stream Slab Migration}: Active and drifting particles advance on device; particles crossing a slab boundary pack into typed \texttt{DevMigrant} packets and stream asynchronously along paired \texttt{d2h\_left\_stream} and \texttt{d2h\_right\_stream} paths to adjacent slabs (wrapping periodically between slab~11 and slab~0).
+  \item \textit{Resident $128^3$ cuFFT PM Solve}: Whenever the integer timeline crosses a PM boundary, each GPU deposits its local slabs onto a resident $128^3$ \texttt{double} mesh via GPU CIC (\texttt{swift\_cuda\_pm.cu}), reduces partial meshes on the host into a $128^3$ \texttt{cuFFT} 3D Poisson solve with \texttt{SWIFT}'s exact truncated Green's function, and scatters interpolated long-range forces back to device particles.
+  \item \textit{Per-Slab Radix Octree and Multipole Construction}: Each slab sorts active keys in device scratch memory, builds a $14$-level radix octree (\texttt{tree\_leaf\_limit = 64}), refits displaced cell centers in their root periodic image, and accumulates $P_2M$ multipoles up to $144$ top-level slab roots.
+  \item \textit{Neighborhood Ghost-Tree Exchange}: Because the Barnes--Hut opening angle $\theta = 0.7$ and TreePM short-range cutoff $r_s$ allow direct or multipole interactions across adjacent slab boundaries, each slab imports the compact \texttt{geometry}, \texttt{multipoles}, and \texttt{force\_nodes} buffers of its $\pm 2$ neighboring slabs.
+  \item \textit{Warp-Level Tree-FMM Force Integration}: Custom \texttt{tree\_force\_warp\_slab} kernels execute warp-cooperative M2L, P2P, and fast exponential short-range split kernels (\texttt{SWIFT\_FAST\_M2P\_EXP}, \texttt{warp\_m2l=1}, \texttt{fast\_split=1}) with zero host involvement.
+  \item \textit{Leapfrog Kick Synchronization}: \texttt{integrate\_slab} closes completed \texttt{kick2} and PM kicks using \texttt{finish[old]}, updates per-particle adaptive power-of-two time bins (\texttt{timeline} $= 2^{57}$), and opens new \texttt{kick1} steps except at the final step \texttt{ti == timeline}.
+\end{enumerate}
+
+A critical systems finding emerged when deploying this ghost-exchange pattern on dual-socket AMD EPYC GPU nodes such as node~\texttt{a9}. Hardware topology inspection via \texttt{nvidia-smi topo -m} reveals that GPUs~\texttt{0..3} share NUMA domain~0 but are split across two PCIe root complexes: GPUs~\texttt{0$\leftrightarrow$1} and GPUs~\texttt{2$\leftrightarrow$3} are connected by bonded 4-lane NVLink4 bridges (\texttt{NV4}), whereas pairs crossing the bridge (\texttt{0,1}$\leftrightarrow$\texttt{2,3}) communicate over PCIe \texttt{NODE} interconnects without hardware NVLink atomics. When \texttt{SWIFT\_P2P\_MODE=all} enables direct CUDA \texttt{cudaDeviceEnablePeerAccess} across \texttt{NODE} links (\texttt{can\_peer[i][j] = 1} for all pairs), $1024^3$ execution deadlocks on Step~0 with GPUs~0 and~2 spinning at $100\%$ SM utilization ($140\,\mathrm{W}$) and GPUs~1 and~3 stalled idle ($0\%$, $21\text{--}24\,\mathrm{W}$). Setting \texttt{SWIFT\_P2P\_MODE=nvlink} (default) gates direct \texttt{cudaDeviceEnablePeerAccess} strictly on \texttt{cudaDevP2PAttrNativeAtomicSupported == 1}, routing intra-pair transfers (\texttt{0$\leftrightarrow$1}, \texttt{2$\leftrightarrow$3}) via zero-copy NVLink and inter-island ghost/migrant transfers (\texttt{1$\leftrightarrow$2}, periodic \texttt{0$\leftrightarrow$3}) cleanly through dual pinned-host staging buffers.
+
+\subsection{Fast Single-Pass C CIC Deposition for Billion-Particle Analysis}
+
+Analyzing billion-particle HDF5 snapshots in pure Python via repeated \texttt{numpy.add.at} scatter operations across $1{,}024$ one-million-particle chunks ($\sim 5.7 \times 10^4$ Python kernel dispatches onto $256^3$ double grids) consumed $42$--$52\,\mathrm{min}$ on host CPUs and triggered a $2.2\,\mathrm{h}$ idle-GPU Slurm termination in an initial mid-redshift run (\texttt{Slurm 489937}). We resolved this analysis bottleneck by implementing a single-pass deterministic C99 CIC kernel (\texttt{cic\_deposit.c}) invoked via \texttt{ctypes} from \texttt{eval\_1024\_snapshot.py}. Verified against \texttt{numpy.add.at} on $1{,}048{,}576$ particles including periodic wrap boundaries, the C kernel achieves $\max|\Delta \rho| = 4.44 \times 10^{-16}$ and $\max|\Delta \mathbf{p}| = 2.27 \times 10^{-13}$ (particle mass conservation error $0.0$) while accelerating CIC deposition by $8.3\times$, cutting full evaluation wall time on snapshot~\texttt{0045} to $27.9\,\mathrm{min}$ (dominated by serial \texttt{gzip-1} HDF5 decompression of $\sim 72\,\mathrm{GB}$ input).
+
+\section{Benchmark Suite and Validation Methodology}\label{sec:bench}
+
+All benchmarks solve pure collisionless dark-matter gravity in a periodic comoving box of $L = 25\,h^{-1}\,\mathrm{Mpc}$ ($37.1140\,\mathrm{Mpc}$) under a Planck~2018~\citep{Planck2018VI} flat $\Lambda$CDM cosmology ($h = 0.6736$, $\Omega_m = 0.3153$, $\Omega_\Lambda = 0.6847$, $\Omega_{\rm cdm} = 0.266$), matching an archival 256-core CHPC CPU \texttt{SWIFT} production simulation (\texttt{PL\_25\_1024}) initialized at $z = 200$ via \texttt{monofonIC}~\citep{Michaux2021monofonIC} and evolved through $20{,}194$ clean steps (\texttt{0..20193}) to $z = 0$ with $56$ snapshots (\texttt{0000}--\texttt{0056}). Key runtime parameters match upstream \texttt{SWIFT}: Plummer softening $\epsilon = 2.1746\,\mathrm{kpc}$ ($1.465\,h^{-1}\,\mathrm{kpc}$ comoving), Barnes--Hut opening angle $\theta = 0.7$, dynamic power-of-two PM spans with \texttt{16} short substeps per PM interval, and gravitational constant $G = 43.0092$.
+
+Our validation ladder consists of three stages executed on node~\texttt{a9} ($4 \times \text{NVIDIA RTX A6000}$, dual-socket AMD EPYC host, CUDA~12.6):
+\begin{enumerate}
+  \item \textit{Gate~1 ($256^3 = 16{,}777{,}216$ particles, $a = 0.855 \rightarrow 0.920$)}: Verifies algorithmic invariance and strong scaling across $G = 1, 2, 4$ GPUs (\texttt{Slurm 489828}, $320$ steps, $17$ PM updates) under identical parameters.
+  \item \textit{Late-Redshift $1024^3$ End-to-End ($0055 \rightarrow 0056$, $z = 0.063 \rightarrow 0$, $a = 0.94059 \rightarrow 1.00000$)}: Evolves $1.074 \times 10^9$ particles from archival snapshot \texttt{PL\_25\_1024\_0055.hdf5} through $513$ GPU steps ($33$ PM updates) across $1\times$ RTX A6000, $4\times$ single-NVLink (\texttt{Slurm 489830}), $4\times$ \texttt{SWIFT\_P2P\_MODE=all} probe (\texttt{Slurm 489878}), and $4\times$ dual-NVLink (\texttt{Slurm 489882}).
+  \item \textit{Mid-Redshift $1024^3$ End-to-End ($0044 \rightarrow 0045$, $z = 2.033 \rightarrow 1.758$, $a = 0.32967 \rightarrow 0.36264$)}: Evolves $1.074 \times 10^9$ particles from \texttt{PL\_25\_1024\_0044.hdf5} through $910$ GPU steps ($50$ PM updates) on $4\times$ dual-NVLink GPUs both solo (\texttt{Slurm 489937}) and co-scheduled on a shared node (\texttt{Slurm 489982}), complemented by a $17$-step $1\times$ RTX A6000 timing probe ($a = 0.32967 \rightarrow 0.33050$).
+\end{enumerate}
+
+For every $1024^3$ end-to-end validation, GPU binaries are converted back to HDF5, clustered with standalone native 64/96-thread CPU \texttt{SWIFT fof}~\citep{Davis1985FOF} using identical configuration parameters, and evaluated against archival CHPC snapshots (\texttt{PL\_25\_1024\_0056/0045.hdf5} and \texttt{fof\_output\_0056/0045.hdf5}) across four metrics: (i) $16{,}388$ ID-matched particle position and velocity errors (plus \texttt{SWIFT\_FORCE3\_OUT} short/long force diagnostics for kick-convention alignment), (ii) CIC-deconvolved $256^3$ matter density power spectra $P_\delta(k)$ over $k \in [0.3, 16]\,h\,\mathrm{Mpc}^{-1}$ ($63$ spherical $k$-bins), (iii) velocity-momentum divergence power spectra $P_\theta(k)$ before and after short-kick synchronization, and (iv) cumulative FoF halo mass functions over $N_{\min} \in [32, 262{,}144]$. Device power and memory telemetry are sampled every $5\,\mathrm{s}$ via \texttt{nvidia-smi} filtered strictly to the four allocated GPU indices.
+
+\section{Performance, Strong Scaling, and Interconnect Topology}\label{sec:perf}
+
+\subsection{Gate 1 Strong Scaling and Multi-GPU Invariance (\texorpdfstring{$256^3$}{256 cubed})}
+
+Table~\ref{tab:gate1} summarizes Gate~1 on $256^3$ particles across $G = 1, 2, 4$ GPUs (\texttt{CUDA\_VISIBLE\_DEVICES=1,2,3,4}, where only GPUs~\texttt{2$\leftrightarrow$3} share NVLink). Scaling from $1$ to $2$ GPUs uses pinned-host staging on both boundaries (\texttt{can\_peer = [[1,0],[0,1]]}) and trims runtime from $72.80\,\mathrm{s}$ to $61.48\,\mathrm{s}$ ($1.18\times$). Enabling $G = 4$ adds NVLink peer access on the central boundary (\texttt{2$\leftrightarrow$3}) and drops runtime to $30.78\,\mathrm{s}$ ($2.36\times$ vs.\ $G=1$). Crucially, all three GPU counts preserve bit-level scientific invariance relative to the CPU reference (\texttt{pos\_rms = 0.022825 kpc/h}, $P_\delta$ max deviation $1.057 \times 10^{-5}$, and kick-aligned $P_\theta$ max deviation $1.946 \times 10^{-4}$ across all $G$).
+
+\begin{table}[!tbp]
+\caption{Gate 1 ($256^3$, $a = 0.855 \rightarrow 0.920$, 320 steps, 17 PM) strong scaling and invariance on node \texttt{a9} (\texttt{Slurm 489828}).}\label{tab:gate1}
+\scriptsize
+\setlength{\tabcolsep}{2.5pt}
+\begin{ruledtabular}
+\begin{tabular}{lccccc}
+GPUs & Topology & Evo (s) & vs.\ $G=1$ & Pos RMS & $P_\delta$ max dev \\
+\hline
+$G=1$ & Single GPU & $72.80$ & $1.00\times$ & $0.02283$ & $1.057\times 10^{-5}$ \\
+$G=2$ & PCIe bounce & $61.48$ & $1.18\times$ & $0.02283$ & $1.057\times 10^{-5}$ \\
+$G=4$ & Single-NVL & $30.78$ & $2.36\times$ & $0.02283$ & $1.057\times 10^{-5}$ \\
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+
+\subsection{Billion-Particle Timing, Interconnect Effects, and VRAM Headroom}
+
+\figwide{fig2_scaling_and_vram.pdf}{(a) Pure gravity evolution wall-clock time and speedup vs.\ the 256-core archival CHPC CPU run for $1024^3$ segments at $z = 0.063 \rightarrow 0$ ($513$ GPU steps) and $z = 2.033 \rightarrow 1.758$ ($910$ GPU steps); the hatched bar denotes the $1\times$ A6000 $0044 \rightarrow 0045$ projection calibrated from a $17$-step mid-$z$ probe ($265.68\,\mathrm{s}$). (b) Per-GPU device memory allocation and particle counts on dual-NVLink $4 \times \text{RTX A6000}$ at $z = 1.758$ ($12.31\,\mathrm{GB}$ minimum free headroom) and $z = 0$ ($4.86\,\mathrm{GB}$ minimum free headroom).}{fig:scaling}
+
+Table~\ref{tab:perf1024} and Fig.~\ref{fig:scaling} quantify billion-particle ($1024^3$) scaling across interconnects and redshifts. At $z = 0.063 \rightarrow 0$, moving from $1\times$ RTX A6000 (\texttt{slab\_resident.cu}, $10{,}540.44\,\mathrm{s}$) to $4\times$ RTX A6000 with a single active NVLink pair (\texttt{1,2,3,4}, \texttt{Slurm 489830}) cuts runtime to $5{,}719.90\,\mathrm{s}$ ($1.84\times$ multi-GPU scaling; $5.57\times$ vs.\ 256-core CPU). Re-targeting the job to dual-NVLink pairs (\texttt{0,1,2,3}, \texttt{Slurm 489882}) eliminates the extra host-bounce boundary between GPUs~0 and~1, cutting runtime by a further $1.30\times$ down to \textbf{$4{,}388.62\,\mathrm{s}$ ($73\,\mathrm{m}\,09\,\mathrm{s}$)}---a \textbf{$2.40\times$ speedup over $1\times$ A6000} and \textbf{$7.26\times$ speedup over 256-core CPU \texttt{SWIFT}} ($31{,}878.77\,\mathrm{s}$ across $757$ CPU steps). Conversely, attempting direct CUDA P2P over PCIe \texttt{NODE} bridges (\texttt{SWIFT\_P2P\_MODE=all}, \texttt{Slurm 489878}) hangs indefinitely at Step~0, validating native-atomic NVLink gating as essential on dual-root EPYC hardware.
+
+At mid-redshift ($z = 2.033 \rightarrow 1.758$), gravitational clustering is weaker and particle distribution across the 12 $Y$-slabs is significantly more uniform: GPU~particle loads range over $[205.0, 279.0, 293.1, 296.6]\,\mathrm{M}$ versus $[137.4, 269.5, 348.2, 318.7]\,\mathrm{M}$ at $z=0$. Consequently, minimum per-GPU free VRAM rises from $4.86\,\mathrm{GB}$ ($z=0$) to \textbf{$12.31\,\mathrm{GB}$} ($z=1.758$), and pure evolution on an idle \texttt{a9} node (\texttt{Slurm 489937}) finishes $910$ steps ($50$ PM updates) in \textbf{$3{,}510.98\,\mathrm{s}$ ($58\,\mathrm{m}\,31\,\mathrm{s}$)}. Against the 256-core archival CPU run ($589$ steps totaling $33{,}863.74\,\mathrm{s}$, or $32{,}538.37\,\mathrm{s}$ pure gravity excluding Step~8392 inline snapshot/FoF dump overhead), dual-NVLink $4\times$ A6000 delivers \textbf{$9.27\times$ pure-evolution speedup} ($9.64\times$ against total CPU step time). Even when node~\texttt{a9} is shared concurrently with another user's GPU job occupying GPU~4 and 128 host cores (\texttt{Slurm 489982}), shared-PCIe contention slows evolution by only $24\%$ to $4{,}362.17\,\mathrm{s}$ ($7.46\times$ pure / $7.76\times$ total vs.\ CPU), and allocated GPU power draw drops correspondingly ($637.14\,\mathrm{W}$ vs.\ $735.87\,\mathrm{W}$ solo), keeping GPU energy consumption nearly invariant ($0.772\,\mathrm{kWh}$ vs.\ $0.718\,\mathrm{kWh}$).
+
+\begin{table*}[!tbp]
+\caption{Billion-particle ($1024^3$) execution performance, minimum free VRAM headroom, and allocated GPU telemetry power on $1\times$ and $4\times$ RTX A6000 vs.\ 256-core CPU \texttt{SWIFT}.}\label{tab:perf1024}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{ruledtabular}
+\begin{tabular}{llcccccc}
+Epoch / Run & Config & Steps (PM) & Evo (s) & vs.\ CPU & vs.\ $1\times$ GPU & Free (GB) & Power (W) \\
+\hline
+\multicolumn{8}{c}{\textit{Late Redshift: $0055 \rightarrow 0056$ ($z = 0.063 \rightarrow 0$, CPU: $757$ steps / $31{,}878.77\,\mathrm{s}$)}} \\
+\texttt{slab-1024-0056} & $1\times$ A6000 resident & 513 (33) & $10{,}540.44$ & $3.02\times$ & $1.00\times$ & $17.34$ & $217.41$ \\
+\texttt{Slurm 489830} & $4\times$ A6000 1-NVLink & 513 (33) & $5{,}719.90$ & $5.57\times$ & $1.84\times$ & $4.86$ & --- \\
+\texttt{Slurm 489878} & $4\times$ A6000 \texttt{p2p=all} & --- & \multicolumn{3}{c}{\textit{Stalled at Step~0 (PCIe NODE P2P hang)}} & $4.86$ & --- \\
+\texttt{Slurm 489882} & $4\times$ A6000 Dual-NVL & 513 (33) & $\mathbf{4{,}388.62}$ & $\mathbf{7.26\times}$ & $\mathbf{2.40\times}$ & $4.86$ & $657.12$ \\
+\hline
+\multicolumn{8}{c}{\textit{Mid Redshift: $0044 \rightarrow 0045$ ($z = 2.033 \rightarrow 1.758$, CPU: $589$ steps / $32{,}538.37\,\mathrm{s}$ pure, $33{,}863.74\,\mathrm{s}$ tot)}} \\
+\texttt{slab1-probe} & $1\times$ A6000 (17-step) & 17 (2) & $265.68^\dagger$ & $3.35\times^\dagger$ & $1.00\times$ & $24.89$ & --- \\
+\texttt{Slurm 489937} & $4\times$ A6000 Dual-NVL solo & 910 (50) & $\mathbf{3{,}510.98}$ & $\mathbf{9.27\times}$ & $\approx 2.77\times^\dagger$ & $\mathbf{12.31}$ & $735.87$ \\
+\texttt{Slurm 489982} & $4\times$ A6000 Dual-NVL shr. & 910 (50) & $4{,}362.17$ & $7.46\times$ & $\approx 2.23\times^\dagger$ & $12.31$ & $637.14$ \\
+\end{tabular}
+\end{ruledtabular}
+\begin{flushleft}
+\footnotesize $^\dagger$The 17-step mid-$z$ probe ($a = 0.32967 \rightarrow 0.33050$, mean PM $59.85\,\mathrm{s}$, non-PM fit $4.30 + 69.83\,f_{\rm act}\,\mathrm{s}$) projects $9{,}710.15\,\mathrm{s}$ over the 910-step workload.
+\end{flushleft}
+\end{table*}
+
+\section{Multi-Redshift Scientific Validation}\label{sec:valid}
+
+\figwide{fig3_scientific_validation.pdf}{Billion-particle ($1024^3$) scientific accuracy of the $4 \times \text{RTX A6000}$ Dual-NVLink solver against archival 256-core CPU \texttt{SWIFT} at $z=0$ (\texttt{0056}) and $z=1.758$ (\texttt{0045}). (a) Matter power spectrum fractional deviation $(P_\delta^{\rm GPU}/P_\delta^{\rm CPU} - 1)$ across $k \in [0.3, 16]\,h\,\mathrm{Mpc}^{-1}$ remains within $0.0045\%$ ($z=0$) and $0.0102\%$ ($z=1.758$). (b) Momentum divergence spectrum $P_\theta(k)$: raw $z=1.758$ velocities match directly ($0.0111\%$), whereas end-of-run $z=0$ velocities exhibit a $-2\mathbf{s}$ short-force kick convention offset ($0.702\%$ raw) whose removal collapses the residual $17.3\times$ to $0.0405\%$. (c) Cumulative native \texttt{SWIFT} FoF halo counts agree within $\pm 0.32\%$ ($z=0$) and $\pm 0.18\%$ ($z=1.758$, $N_{\min} \le 65{,}536$), well inside Poisson $\pm N_{\rm halo}^{-1/2}$ bounds.}{fig:valid}
+
+\subsection{Particle Accuracy and Matter Power Spectra}
+
+As summarized in Table~\ref{tab:acc} and Fig.~\ref{fig:valid}(a), every $1024^3$ validation finishes with \texttt{bad\_count = 0}. Across $16{,}388$ ID-matched particles (\texttt{ID mod 65521 == 0}), comoving position errors remain deep in the sub-softening regime: at $z=0$ (\texttt{0056}), $\mathrm{RMS} = 0.05051\,h^{-1}\mathrm{kpc}$ (\texttt{p50 = 0.01019 kpc/h}, $< 1\%$ of the $1.465\,h^{-1}\mathrm{kpc}$ softening length); at $z = 1.758$ (\texttt{0045}), $\mathrm{RMS} = 0.09717\,h^{-1}\mathrm{kpc}$ with an even tighter median of \texttt{0.00775 kpc/h}. Comparing single-GPU (\texttt{slab-1024-0056}) against $4\times$-GPU (\texttt{Slurm 489882}) at $z=0$ confirms that multi-GPU slab decomposition introduces less than $10^{-5}$ relative difference in RMS error ($0.050507$ vs.\ $0.050513\,h^{-1}\mathrm{kpc}$).
+
+On the deconvolved $256^3$ FFT density field over $k \in [0.3, 16]\,h\,\mathrm{Mpc}^{-1}$ ($63$ bins), the matter power spectrum $P_\delta(k)$ matches archival CPU \texttt{SWIFT} to $\max|P_\delta^{\rm GPU}/P_\delta^{\rm CPU} - 1| = \mathbf{0.00453\%}$ ($\mathrm{RMS} = 0.00288\%$, $\min r = 0.999999973$) at $z=0$ and $\mathbf{0.01019\%}$ ($\mathrm{RMS} = 0.00610\%$, $\min r = 0.999999950$) at $z = 1.758$. On cosmological linear-to-quasilinear scales ($0.3\text{--}1\,h\,\mathrm{Mpc}^{-1}$), deviations do not exceed $0.00017\%$ at either redshift, outperforming standard precision-cosmology accuracy requirements ($\sim 0.1\text{--}1\%$) by more than an order of magnitude.
+
+\begin{table}[!tbp]
+\caption{End-to-end $1024^3$ accuracy on $4\times$ RTX A6000 Dual-NVLink relative to archival 256-core CPU \texttt{SWIFT} ($0.3\text{--}16\,h\,\mathrm{Mpc}^{-1}$).}\label{tab:acc}
+\scriptsize
+\setlength{\tabcolsep}{1.8pt}
+\begin{ruledtabular}
+\begin{tabular}{lcc}
+Metric & \texttt{0056} ($z=0$) & \texttt{0045} ($z=1.758$) \\
+\hline
+Pos RMS / p50 (kpc/$h$) & $0.0505$ / $0.0102$ & $0.0972$ / $0.0078$ \\
+$P_\delta(k)$ max dev / RMS & $\mathbf{0.00453\%}$ / $0.0029\%$ & $\mathbf{0.01019\%}$ / $0.0061\%$ \\
+$P_\delta(k)$ min $r$ & $0.999999973$ & $0.999999950$ \\
+Raw vel RMS / p50 & $2.666$ / $0.996$ & $\mathbf{0.623}$ / $\mathbf{0.0186}$ \\
+Sync vel RMS / p50 & $\mathbf{1.187}$ / $\mathbf{0.336}$ & \textit{(already sync.)} \\
+Raw $P_\theta(k)$ max dev & $0.7018\%$ ($0.99976$) & $\mathbf{0.01112\%}$ ($0.9999999$) \\
+Aligned $P_\theta(k)$ dev & $\mathbf{0.0405\%}$ ($0.9999996$) & \textit{(over-shift $0.569\%$)} \\
+FoF $\#1$ halo & $34.804\mathrm{M}$ vs.\ $34.805\mathrm{M}$ & $6.566\mathrm{M}$ vs.\ $6.563\mathrm{M}$ \\
+FoF $N\!\ge\!32..65\text{k}$ diff & $-0.32\%\,..\,{+}0.03\%$ & $-0.18\%\,..\,{+}0.02\%$ \\
+FoF $N\!\ge\!262{,}144$ & $198$ vs.\ $198$ ($0.0\%$) & $146$ vs.\ $147$ ($-0.68\%$) \\
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+
+\subsection{Velocity Kick Synchronization Closure Across Snapshots}
+
+Examining the momentum divergence spectrum $P_\theta(k)$ ($\theta = \nabla \cdot [(1+\delta)\mathbf{v}]$) across both redshifts reveals an instructive contrast rooted in leapfrog snapshot timing (Fig.~\ref{fig:valid}(b)). In \texttt{integrate\_slab}, when the timeline reaches the run endpoint \texttt{ti == timeline}, the GPU closes both short-range (\texttt{kick2}) and PM kicks (\texttt{mesh\_kick}) while suppressing opening \texttt{kick1} (\texttt{if (ti != timeline)}), exporting velocities strictly synchronized at $a_{\rm end}$.
+
+At the intermediate archival snapshot \texttt{0045} (CHPC CPU step \texttt{8392}, property bitmask \texttt{Props = 145 = Rebuild + Snapshot + FOF}), archival CPU velocities match the GPU synchronized export directly: raw velocity differences show a tiny median of \textbf{$0.0186\,\mathrm{km/s}$} ($\mathrm{RMS} = 0.6226\,\mathrm{km/s}$) and raw $P_\theta(k)$ agrees to \textbf{$0.01112\%$} ($\min r = 0.999999879$); artificially adding $+2\mathbf{s}$ in post-processing un-synchronizes the velocities ($P_\theta$ degrades to $0.5694\%$). By contrast, at the final end-of-simulation snapshot \texttt{0056} (CHPC step \texttt{20193}, \texttt{Props = 257 = Rebuild + mesh}, $g$-updates $= 1{,}073{,}741{,}824$), raw CPU--GPU velocity residuals regress linearly onto the per-particle final short-range kick $\mathbf{s}$ and long-range kick $\mathbf{l}$ with two-component slope $[-1.9197, -0.0219]$, explaining \textbf{$80.30\%$} of raw $\Delta v$ variance ($2.6657 \rightarrow 1.1870\,\mathrm{km/s}$) and collapsing $P_\theta(k)$ error \textbf{$17.3\times$} from $0.7018\%$ down to \textbf{$0.0405\%$} ($\min r = 0.999999614$). Taken together, both snapshots confirm $\sim 0.01\text{--}0.04\%$ intrinsic velocity-divergence agreement once endpoint kick state is matched.
+
+\subsection{Native SWIFT FoF Halo Mass Function Alignment}
+
+Running upstream native \texttt{SWIFT fof} directly on the $z=0$ ($64$ threads) and $z=1.758$ ($96$ threads) snapshots demonstrates remarkable nonlinear halo preservation (Fig.~\ref{fig:valid}(c)). At $z=0$, the largest cluster-scale halo contains $34{,}804{,}209$ particles on $4\times$ GPU vs.\ $34{,}804{,}779$ on CPU ($-0.0016\%$ difference); cumulative halo counts across $N_{\min} \ge 32 \dots 65{,}536$ ($674{,}485$ down to $617$ halos) agree within $-0.32\%$ to $+0.026\%$, and massive halos with $N_{\min} \ge 262{,}144$ match identically ($198$ vs.\ $198$, $0.0\%$). At $z=1.758$, where halos are smaller ($6{,}566{,}460$ vs.\ $6{,}562{,}673$ particles in halo~\#1, $+0.058\%$), cumulative counts over $N_{\min} \ge 32 \dots 65{,}536$ ($871{,}028$ to $593$ halos) remain within $-0.18\%$ to $+0.019\%$, and $N_{\min} \ge 262{,}144$ differs by a single object ($146$ vs.\ $147$, $-0.68\%$), well inside Poisson $\pm N_{\rm halo}^{-1/2}$ statistical bounds ($8.2\%$).
+
+\section{Full-History (\texorpdfstring{$z = 200 \rightarrow 0$}{z = 200 -> 0}) Compute and Energy Scaling}\label{sec:history}
+
+\figwide{fig4_full_history_scaling.pdf}{(a) Six-epoch breakdown of the $20{,}194$-step archival 256-core CPU \texttt{SWIFT} run ($304.48\,\mathrm{h}$ pure gravity plus $18.18\,\mathrm{h}$ across $56$ inline Snapshot/FoF dumps) compared against clamped-interval projections for $1\times$ and $4\times$ RTX A6000 NVLink. Notice the $265$-step $z=200\rightarrow 50$ regime consumes $60.1\,\mathrm{h}$ on CPU due to uniform all-particle PM tree walks. (b) Integrated $z = 200 \rightarrow 0$ and $z = 50 \rightarrow 0$ pure-evolution wall time ($\mathrm{h}$) and whole-node energy ($\mathrm{kWh}$); error bars bracket the clamped-interval and step-physics models.}{fig:history}
+
+To quantify end-to-end cosmological campaign savings beyond individual redshift windows, we parsed all $28{,}704$ non-comment rows of the archival CHPC timing log (\texttt{timesteps\_1024.txt}), filtering out $335$ truncated restart lines to reconstruct the complete $20{,}194$ consecutive steps (\texttt{0..20193}, $z = 200 \rightarrow 0$) summarized in Table~\ref{tab:epochs}. Separating the $56$ inline Snapshot+FoF dump steps ($18.18\,\mathrm{h}$ excess overhead above epoch step medians) yields \textbf{$304.48\,\mathrm{h}$ ($12.69\,\mathrm{days}$)} of pure CPU gravity evolution ($322.66\,\mathrm{h} = 13.44\,\mathrm{days}$ total, consuming $82{,}600$ CPU core-hours). From $z = 50 \rightarrow 0$ (steps \texttt{265..20193}, $19{,}929$ steps), CPU gravity totals $248.65\,\mathrm{h}$ ($262.54\,\mathrm{h}$ total). Notably, the first $265$ steps ($z = 200 \rightarrow 50$, just $1.3\%$ of total steps) consume $55.82\,\mathrm{h}$ of pure CPU gravity because every step triggers a full-box global PM+tree pass across all $1.074 \times 10^9$ particles over nearly unclustered cells ($738.6\,\mathrm{s}$ median step time on 256 cores), whereas uniform-grid Step-0 GPU PM steps execute in only $11.5$--$20.7\,\mathrm{s}$ on $4\times$ A6000.
+
+\begin{table}[!tbp]
+\caption{Six-epoch breakdown of the $20{,}194$-step archival 256-core CPU \texttt{PL\_25\_1024} simulation.}\label{tab:epochs}
+\scriptsize
+\setlength{\tabcolsep}{2.5pt}
+\begin{ruledtabular}
+\begin{tabular}{lcccccc}
+Epoch & Steps & PM & Dumps & Pure (h) & Tot (h) & PM med (s) \\
+\hline
+$z = 200 \rightarrow 50$ & 265   & 265 & 15 & $55.82$ & $60.12$ & $738.6$ \\
+$z = 50 \rightarrow 10$  & 1{,}591 & 296 & 16 & $25.70$ & $30.75$ & $252.3$ \\
+$z = 10 \rightarrow 4$   & 2{,}857 & 153 & 8  & $33.12$ & $35.82$ & $200.1$ \\
+$z = 4 \rightarrow 1.5$  & 4{,}430 & 264 & 8  & $63.00$ & $65.82$ & $197.4$ \\
+$z = 1.5 \rightarrow 0.5$& 6{,}040 & 384 & 5  & $68.45$ & $70.25$ & $169.2$ \\
+$z = 0.5 \rightarrow 0$  & 5{,}011 & 314 & 4  & $58.38$ & $59.90$ & $155.1$ \\
+\hline
+$z = 200 \rightarrow 0$ & 20{,}194 & 1{,}676 & 56 & $304.48$ & $322.66$ & --- \\
+$z = 50 \rightarrow 0$  & 19{,}929 & 1{,}411 & 41 & $248.65$ & $262.54$ & --- \\
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+
+We bracket full-run GPU requirements with two complementary models (\texttt{model\_1024\_full\_history.py}, Fig.~\ref{fig:history} and Table~\ref{tab:fullrun}):
+(1) a \textit{Clamped Interval Model} that interpolates measured pure-evolution speedups linearly in scale factor $a$ between $z \approx 2$ ($a=0.346$) and $z \approx 0$ ($a=0.970$) while conservatively capping high-redshift speedup at the $z \approx 2$ anchor ($9.27\times$ for $4\times$ solo), and
+(2) a \textit{Step-Physics Regression Model} that evaluates fitted per-step GPU costs $t_{\rm nonPM} = \alpha + \beta (N_{\rm act}/1024^3)$ ($\alpha=1.64$--$4.76\,\mathrm{s}$, $\beta=19.6$--$21.2\,\mathrm{s}$ on $4\times$ solo) and mean PM step times ($20.72$--$22.47\,\mathrm{s}$) across all $20{,}194$ steps, scaled by empirical dynamic-PM step-count ratios ($1.0$ at $z \ge 50$, $910/589$ at $z \approx 2$, $513/757$ at $z \approx 0$). Whole-node electrical energy compares a nominal $700\,\mathrm{W}$ dual-socket 256-core CPU server ($213.1\,\mathrm{kWh}$ pure gravity) against directly measured allocated GPU telemetry ($217.4\,\mathrm{W}$ for $1\times$, $696.5\,\mathrm{W}$ mean solo / $647.1\,\mathrm{W}$ shared across GPUs~\texttt{0..3}) plus $+100$--$120\,\mathrm{W}$ host overhead.
+
+\begin{table}[!tbp]
+\caption{Full-history $1024^3$ pure-evolution runtime (hours) and whole-node energy (kWh) projections (\texttt{clamped} / \texttt{step-physics} range).}\label{tab:fullrun}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{ruledtabular}
+\begin{tabular}{lcccc}
+Platform & $z=200{\to}0$ & Speedup & Energy & $z=50{\to}0$ \\
+\hline
+256-core CPU & $304.5$ ($12.7\,\mathrm{d}$) & $1.00\times$ & $213.1$ & $248.7$ \\
+$1\times$ A6000 & $92.9$--$96.1$ & $3.17$--$3.28\times$ & $29.5$--$30.5$ & $76.2$--$91.7$ \\
+$4\times$ A6000 solo & $\mathbf{34.6\text{--}35.8}$ & $\mathbf{8.50\text{--}8.80\times}$ & $\mathbf{28.3\text{--}29.2}$ & $\mathbf{28.6\text{--}34.3}$ \\
+$4\times$ A6000 shr. & $41.1$--$41.3$ & $7.37$--$7.42\times$ & $31.5$--$31.7$ & $33.6$--$39.7$ \\
+\end{tabular}
+\end{ruledtabular}
+\end{table}
+
+Both independent models agree within $3.5\%$: evolving $1024^3$ particles across the full cosmological history $z = 200 \rightarrow 0$ requires \textbf{$34.6$--$35.8\,\mathrm{h}$ ($1.44$--$1.49$ days)} on four NVLink-paired RTX A6000 GPUs versus $12.69$ node-days of pure gravity on 256 CPU cores ($8.50$--$8.80\times$ speedup), while cutting whole-node energy from $213.1\,\mathrm{kWh}$ down to \textbf{$28.3$--$29.2\,\mathrm{kWh}$ ($\approx 86\%$ savings)}. Even $1\times$ RTX A6000 saves a comparable fraction of electricity ($29.5$--$30.5\,\mathrm{kWh}$) despite taking $3.9$--$4.0$ days. Measured post-processing (\texttt{to-hdf5} averaging $1{,}260\,\mathrm{s/snap}$ and 96-thread CPU FoF at $2{,}986\,\mathrm{s}$ at $z \approx 2$ or $1{,}773\,\mathrm{s}$ at $z=0$) can run asynchronously on host CPUs from binary checkpoints, preserving the $\sim 1.5$-day GPU wall clock for full 56-snapshot campaigns.
+
+\section{Conclusions and Code Availability}\label{sec:conc}
+
+We have demonstrated that partitioning $1024^3$ self-gravitating cosmological particles across four $48\,\mathrm{GiB}$ GPUs via a cyclic 12-slab VRAM-resident architecture completely eliminates host particle swapping while achieving $7.26\times$--$9.27\times$ acceleration over a 256-core CPU \texttt{SWIFT} baseline and preserving $0.0045\%$--$0.010\%$ matter power, $0.011\%$--$0.041\%$ synchronized momentum divergence, and $\pm 0.32\%$ native FoF halo mass function agreement across redshifts. Resolving EPYC PCIe \texttt{NODE} peer-access deadlocks through native-atomic NVLink gating (\texttt{SWIFT\_P2P\_MODE=nvlink}) unlocks $2.40\times$ multi-GPU scaling and projects complete $z = 200 \rightarrow 0$ billion-particle campaigns in $\approx 1.45\,\mathrm{days}$ and $< 30\,\mathrm{kWh}$. All CUDA kernels, evaluation tools (including \texttt{cic\_deposit.c}), Slurm scripts, verification JSON/CSV datasets, and full-history models are open-source at \url{https://github.com/HainaHuang729/swift-treepm-gpu}.
+
+\begin{acknowledgments}
+GPU benchmarks and end-to-end validations were executed on the Department of Physics GPU cluster (\texttt{a9}) at The Chinese University of Hong Kong, and reference archival snapshots were produced on the CUHK Central High-Performance Computing Cluster (\texttt{PL\_25\_1024}).
+\end{acknowledgments}
+
+\bibliography{references}
+
+\end{document}

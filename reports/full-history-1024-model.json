@@ -1,0 +1,481 @@
+{
+  "timesteps_summary": {
+    "raw_noncomment_lines": 28704,
+    "skipped_malformed_lines": 335,
+    "clean_unique_steps": 20194,
+    "z50_start_step": 265,
+    "z50_start_a": 0.0196266,
+    "z50_start_z": 49.9511639,
+    "epoch_breakdown": [
+      {
+        "epoch": "z=200->50",
+        "steps": 265,
+        "pm_steps": 265,
+        "dump_steps": 15,
+        "mean_active_particles": 1073741824,
+        "cpu_total_s": 216435.369157,
+        "cpu_pure_evo_s": 200959.342372,
+        "cpu_dump_overhead_s": 15476.026785000002,
+        "cpu_pm_median_s": 738.613031,
+        "cpu_non_pm_median_s": 0.0
+      },
+      {
+        "epoch": "z=50->10",
+        "steps": 1591,
+        "pm_steps": 296,
+        "dump_steps": 16,
+        "mean_active_particles": 208051598.77309868,
+        "cpu_total_s": 110686.783307,
+        "cpu_pure_evo_s": 92533.2334875,
+        "cpu_dump_overhead_s": 18153.5498195,
+        "cpu_pm_median_s": 252.27765599999998,
+        "cpu_non_pm_median_s": 3.0174265
+      },
+      {
+        "epoch": "z=10->4",
+        "steps": 2857,
+        "pm_steps": 153,
+        "dump_steps": 8,
+        "mean_active_particles": 110637938.88939448,
+        "cpu_total_s": 128938.867962,
+        "cpu_pure_evo_s": 119221.743205,
+        "cpu_dump_overhead_s": 9717.124757,
+        "cpu_pm_median_s": 200.09375,
+        "cpu_non_pm_median_s": 30.8447335
+      },
+      {
+        "epoch": "z=4->1.5",
+        "steps": 4430,
+        "pm_steps": 264,
+        "dump_steps": 8,
+        "mean_active_particles": 127402124.30586907,
+        "cpu_total_s": 236941.631478,
+        "cpu_pure_evo_s": 226794.493836,
+        "cpu_dump_overhead_s": 10147.137642000002,
+        "cpu_pm_median_s": 197.42354699999999,
+        "cpu_non_pm_median_s": 41.161722999999995
+      },
+      {
+        "epoch": "z=1.5->0.5",
+        "steps": 6040,
+        "pm_steps": 384,
+        "dump_steps": 5,
+        "mean_active_particles": 125334329.63990067,
+        "cpu_total_s": 252905.949345,
+        "cpu_pure_evo_s": 246420.640321,
+        "cpu_dump_overhead_s": 6485.309024,
+        "cpu_pm_median_s": 169.172438,
+        "cpu_non_pm_median_s": 34.056572
+      },
+      {
+        "epoch": "z=0.5->0",
+        "steps": 5011,
+        "pm_steps": 314,
+        "dump_steps": 4,
+        "mean_active_particles": 143536811.85930952,
+        "cpu_total_s": 215656.815828,
+        "cpu_pure_evo_s": 210184.292329,
+        "cpu_dump_overhead_s": 5472.523499,
+        "cpu_pm_median_s": 155.071961,
+        "cpu_non_pm_median_s": 36.141219
+      }
+    ]
+  },
+  "measured_anchors": {
+    "cpu_0044_0045_total_s": 33863.741499,
+    "cpu_0044_0045_pure_evo_s": 32538.367597,
+    "cpu_0055_0056_pure_evo_s": 31878.773532,
+    "gpu1_z2_probe_projected_0044_0045_s": 9710.153197527507,
+    "gpu1_z0": {
+      "log_file": "reports/slab-1024-0056-evolve.log",
+      "a_begin": 0.94059274708,
+      "a_end": 1,
+      "a_mid": 0.97029637354,
+      "steps": 513,
+      "pm_count": 33,
+      "non_pm_count": 480,
+      "evolution_wall_s": 10540.4378387,
+      "whole_program_s": 10700.8767512,
+      "pm_mean_s": 66.87367993736667,
+      "pm_median_s": 63.113353076,
+      "step0_pm_s": 58.446969189,
+      "non_pm_intercept_s": 7.765570133179297,
+      "non_pm_slope_per_1024cubed_s": 69.10357627453196,
+      "min_free_vram_gb": 17.343053824
+    },
+    "gpu1_z2_probe": {
+      "log_file": "reports/slab1-1024-0044-probe.log",
+      "a_begin": 0.329672019748,
+      "a_end": 0.330497230972,
+      "a_mid": 0.33008462536,
+      "steps": 17,
+      "pm_count": 2,
+      "non_pm_count": 15,
+      "evolution_wall_s": 265.683022042,
+      "whole_program_s": 316.250480051,
+      "pm_mean_s": 59.84999934555,
+      "pm_median_s": 59.84999934555,
+      "step0_pm_s": 39.992031599,
+      "non_pm_intercept_s": 4.2987359914285985,
+      "non_pm_slope_per_1024cubed_s": 69.83215267037208,
+      "min_free_vram_gb": 24.890703872
+    },
+    "gpu4_z0": {
+      "log_file": "reports/mgpu4-1024-0056-evolve.log",
+      "a_begin": 0.94059274708,
+      "a_end": 1,
+      "a_mid": 0.97029637354,
+      "steps": 513,
+      "pm_count": 33,
+      "non_pm_count": 480,
+      "evolution_wall_s": 4388.62252007,
+      "whole_program_s": 4445.90992625,
+      "pm_mean_s": 22.468527467724243,
+      "pm_median_s": 21.365328507,
+      "step0_pm_s": 14.384855447,
+      "non_pm_intercept_s": 4.7552577369533715,
+      "non_pm_slope_per_1024cubed_s": 19.606727551333428,
+      "min_free_vram_gb": 4.864999424
+    },
+    "gpu4_z2_solo": {
+      "log_file": "reports/run-489937/mgpu4-1024-0045-evolve.log",
+      "a_begin": 0.329672019748,
+      "a_end": 0.362639221723,
+      "a_mid": 0.3461556207355,
+      "steps": 910,
+      "pm_count": 50,
+      "non_pm_count": 860,
+      "evolution_wall_s": 3510.97576347,
+      "whole_program_s": 3567.12910795,
+      "pm_mean_s": 20.722724270604,
+      "pm_median_s": 19.577217599999997,
+      "step0_pm_s": 11.481724557,
+      "non_pm_intercept_s": 1.6374219319364243,
+      "non_pm_slope_per_1024cubed_s": 21.243404983898145,
+      "min_free_vram_gb": 12.309889024
+    },
+    "gpu4_z2_shared": {
+      "log_file": "reports/mgpu4-1024-0045-evolve.log",
+      "a_begin": 0.329672019748,
+      "a_end": 0.362639221723,
+      "a_mid": 0.3461556207355,
+      "steps": 910,
+      "pm_count": 50,
+      "non_pm_count": 860,
+      "evolution_wall_s": 4362.17285216,
+      "whole_program_s": 4474.60653098,
+      "pm_mean_s": 22.636393531544,
+      "pm_median_s": 20.6464917035,
+      "step0_pm_s": 14.612964959,
+      "non_pm_intercept_s": 2.3857985799206416,
+      "non_pm_slope_per_1024cubed_s": 23.556471593020575,
+      "min_free_vram_gb": 12.309889024
+    }
+  },
+  "measured_power": {
+    "gpu1_z0": {
+      "csv_file": "reports/slab-1024-0056-device.csv",
+      "allocated_indices": [
+        1
+      ],
+      "total_mean_gpu_w": 217.41252685660905,
+      "per_gpu": {
+        "1": {
+          "samples": 2141,
+          "mean_w": 217.41252685660905,
+          "max_w": 299.96,
+          "mean_util_pct": 73.43157403082671,
+          "max_mem_mib": 32002.0
+        }
+      }
+    },
+    "gpu4_z0": {
+      "csv_file": "reports/mgpu4-1024-0056-gpu-telemetry.csv",
+      "allocated_indices": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "total_mean_gpu_w": 657.118911335578,
+      "per_gpu": {
+        "0": {
+          "samples": 891,
+          "mean_w": 110.79508417508417,
+          "max_w": 299.25,
+          "mean_util_pct": 15.858585858585858,
+          "max_mem_mib": 19238.0
+        },
+        "1": {
+          "samples": 891,
+          "mean_w": 167.90006734006735,
+          "max_w": 299.68,
+          "mean_util_pct": 45.148148148148145,
+          "max_mem_mib": 34380.0
+        },
+        "2": {
+          "samples": 891,
+          "mean_w": 194.60294051627386,
+          "max_w": 299.97,
+          "mean_util_pct": 55.97979797979798,
+          "max_mem_mib": 43914.0
+        },
+        "3": {
+          "samples": 891,
+          "mean_w": 183.82081930415265,
+          "max_w": 299.75,
+          "mean_util_pct": 51.28619528619529,
+          "max_mem_mib": 39644.0
+        }
+      }
+    },
+    "gpu4_z2_solo": {
+      "csv_file": "reports/run-489937/mgpu4-1024-0045-gpu-telemetry.csv",
+      "allocated_indices": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "total_mean_gpu_w": 735.8713687150838,
+      "per_gpu": {
+        "0": {
+          "samples": 716,
+          "mean_w": 146.20719273743018,
+          "max_w": 299.68,
+          "mean_util_pct": 32.539106145251395,
+          "max_mem_mib": 26534.0
+        },
+        "1": {
+          "samples": 716,
+          "mean_w": 188.20259776536312,
+          "max_w": 299.67,
+          "mean_util_pct": 54.30027932960894,
+          "max_mem_mib": 34628.0
+        },
+        "2": {
+          "samples": 716,
+          "mean_w": 198.64925977653633,
+          "max_w": 300.27,
+          "mean_util_pct": 58.7304469273743,
+          "max_mem_mib": 36614.0
+        },
+        "3": {
+          "samples": 716,
+          "mean_w": 202.81231843575418,
+          "max_w": 299.76,
+          "mean_util_pct": 60.44972067039106,
+          "max_mem_mib": 36814.0
+        }
+      }
+    },
+    "gpu4_z2_shared": {
+      "csv_file": "reports/mgpu4-1024-0045-gpu-telemetry.csv",
+      "allocated_indices": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "total_mean_gpu_w": 637.140011148272,
+      "per_gpu": {
+        "0": {
+          "samples": 897,
+          "mean_w": 130.07429208472686,
+          "max_w": 299.69,
+          "mean_util_pct": 24.674470457079153,
+          "max_mem_mib": 26534.0
+        },
+        "1": {
+          "samples": 897,
+          "mean_w": 164.06296544035675,
+          "max_w": 299.61,
+          "mean_util_pct": 45.11705685618729,
+          "max_mem_mib": 34628.0
+        },
+        "2": {
+          "samples": 897,
+          "mean_w": 173.41202898550725,
+          "max_w": 299.95,
+          "mean_util_pct": 48.94871794871795,
+          "max_mem_mib": 36614.0
+        },
+        "3": {
+          "samples": 897,
+          "mean_w": 169.59072463768115,
+          "max_w": 300.22,
+          "mean_util_pct": 47.40133779264214,
+          "max_mem_mib": 36814.0
+        }
+      }
+    }
+  },
+  "postprocessing_per_snapshot_measured": {
+    "to_hdf5_0056_s": 925.443161,
+    "to_hdf5_0045_s": 1594.936323,
+    "to_hdf5_mean_s": 1260.189742,
+    "fof_0056_64threads_s": 1772.989473,
+    "fof_0045_96threads_s": 2985.502261,
+    "cpu_archival_56_inline_dumps_s": 65451.6715265
+  },
+  "projections": {
+    "z200_to_z0": {
+      "range": "z=200->0",
+      "cpu_steps": 20194,
+      "cpu_pm_steps": 1676,
+      "cpu_dump_steps": 56,
+      "cpu_256core": {
+        "pure_evo_s": 1096113.7455505,
+        "pure_evo_hours": 304.47604043069447,
+        "dump_overhead_s": 65451.6715265,
+        "total_wall_s": 1161565.417077,
+        "total_wall_hours": 322.6570602991667,
+        "core_hours_total": 82600.20743658667,
+        "assumed_node_w": 700.0,
+        "energy_pure_kwh": 213.13322830148613,
+        "energy_total_kwh": 225.85994220941666
+      },
+      "gpu_models": {
+        "1x_RTX_A6000_slab_resident": {
+          "clamped_interval_model": {
+            "pure_evo_s": 334324.04910575796,
+            "pure_evo_hours": 92.8677914182661,
+            "pure_evo_days": 3.8694913090944207,
+            "effective_speedup_vs_cpu_pure": 3.278596764074732,
+            "gpu_only_kwh": 20.190621195837746,
+            "whole_node_kwh": 29.477400337664353,
+            "energy_ratio_node_vs_cpu_pure": 0.1383050431534181
+          },
+          "step_physics_model": {
+            "pure_evo_s": 345803.94868491864,
+            "pure_evo_hours": 96.0566524124774,
+            "pure_evo_days": 4.002360517186559,
+            "effective_speedup_vs_cpu_pure": 3.1697548559494058,
+            "gpu_only_kwh": 20.883919522383707,
+            "whole_node_kwh": 30.48958476363144,
+            "energy_ratio_node_vs_cpu_pure": 0.14305411224054942
+          }
+        },
+        "4x_RTX_A6000_NVLink_solo": {
+          "clamped_interval_model": {
+            "pure_evo_s": 124604.79746688534,
+            "pure_evo_hours": 34.61244374080148,
+            "pure_evo_days": 1.4421851558667285,
+            "effective_speedup_vs_cpu_pure": 8.796721858496664,
+            "gpu_only_kwh": 24.107398849868417,
+            "whole_node_kwh": 28.260892098764593,
+            "energy_ratio_node_vs_cpu_pure": 0.1325973069707758
+          },
+          "step_physics_model": {
+            "pure_evo_s": 128914.17955223916,
+            "pure_evo_hours": 35.809494320066435,
+            "pure_evo_days": 1.4920622633361014,
+            "effective_speedup_vs_cpu_pure": 8.502662386384952,
+            "gpu_only_kwh": 24.94113876069096,
+            "whole_node_kwh": 29.238278079098933,
+            "energy_ratio_node_vs_cpu_pure": 0.13718310519718743
+          }
+        },
+        "4x_RTX_A6000_NVLink_shared_node": {
+          "clamped_interval_model": {
+            "pure_evo_s": 147777.49754734137,
+            "pure_evo_hours": 41.04930487426149,
+            "pure_evo_days": 1.7103877030942287,
+            "effective_speedup_vs_cpu_pure": 7.417325125561513,
+            "gpu_only_kwh": 26.56421454763636,
+            "whole_node_kwh": 31.49013113254774,
+            "energy_ratio_node_vs_cpu_pure": 0.14774857671654837
+          },
+          "step_physics_model": {
+            "pure_evo_s": 148791.28290666945,
+            "pure_evo_hours": 41.33091191851929,
+            "pure_evo_days": 1.7221213299383038,
+            "effective_speedup_vs_cpu_pure": 7.366787382551478,
+            "gpu_only_kwh": 26.746450762468847,
+            "whole_node_kwh": 31.70616019269116,
+            "energy_ratio_node_vs_cpu_pure": 0.14876216367276826
+          }
+        }
+      }
+    },
+    "z50_to_z0": {
+      "range": "z=50->0",
+      "cpu_steps": 19929,
+      "cpu_pm_steps": 1411,
+      "cpu_dump_steps": 41,
+      "cpu_256core": {
+        "pure_evo_s": 895154.4031785,
+        "pure_evo_hours": 248.65400088291668,
+        "dump_overhead_s": 49975.6447415,
+        "total_wall_s": 945130.04792,
+        "total_wall_hours": 262.53612442222226,
+        "core_hours_total": 67209.2478520889,
+        "assumed_node_w": 700.0,
+        "energy_pure_kwh": 174.05780061804165,
+        "energy_total_kwh": 183.77528709555557
+      },
+      "gpu_models": {
+        "1x_RTX_A6000_slab_resident": {
+          "clamped_interval_model": {
+            "pure_evo_s": 274353.43149289367,
+            "pure_evo_hours": 76.20928652580379,
+            "pure_evo_days": 3.175386938575158,
+            "effective_speedup_vs_cpu_pure": 3.2627782284607085,
+            "gpu_only_kwh": 16.56885355351433,
+            "whole_node_kwh": 24.18978220609471,
+            "energy_ratio_node_vs_cpu_pure": 0.138975570874744
+          },
+          "step_physics_model": {
+            "pure_evo_s": 329943.69885834743,
+            "pure_evo_hours": 91.65102746065206,
+            "pure_evo_days": 3.8187928108605025,
+            "effective_speedup_vs_cpu_pure": 2.713051973036196,
+            "gpu_only_kwh": 19.926081469224826,
+            "whole_node_kwh": 29.09118421529003,
+            "energy_ratio_node_vs_cpu_pure": 0.16713519366551524
+          }
+        },
+        "4x_RTX_A6000_NVLink_solo": {
+          "clamped_interval_model": {
+            "pure_evo_s": 102920.7539017738,
+            "pure_evo_hours": 28.589098306048278,
+            "pure_evo_days": 1.1912124294186783,
+            "effective_speedup_vs_cpu_pure": 8.697511135925252,
+            "gpu_only_kwh": 19.912168027869047,
+            "whole_node_kwh": 23.34285982459484,
+            "energy_ratio_node_vs_cpu_pure": 0.13410981720847548
+          },
+          "step_physics_model": {
+            "pure_evo_s": 123422.65762052928,
+            "pure_evo_hours": 34.28407156125813,
+            "pure_evo_days": 1.4285029817190888,
+            "effective_speedup_vs_cpu_pure": 7.2527558589016,
+            "gpu_only_kwh": 23.878689222696945,
+            "whole_node_kwh": 27.992777810047922,
+            "energy_ratio_node_vs_cpu_pure": 0.1608246094725523
+          }
+        },
+        "4x_RTX_A6000_NVLink_shared_node": {
+          "clamped_interval_model": {
+            "pure_evo_s": 120836.39839509352,
+            "pure_evo_hours": 33.56566622085931,
+            "pure_evo_days": 1.3985694258691381,
+            "effective_speedup_vs_cpu_pure": 7.40798645993778,
+            "gpu_only_kwh": 21.72133149773097,
+            "whole_node_kwh": 25.749211444234085,
+            "energy_ratio_node_vs_cpu_pure": 0.14793483172144078
+          },
+          "step_physics_model": {
+            "pure_evo_s": 142792.63862080997,
+            "pure_evo_hours": 39.664621839113885,
+            "pure_evo_days": 1.6526925766297451,
+            "effective_speedup_vs_cpu_pure": 6.268911421656747,
+            "gpu_only_kwh": 25.66814536111046,
+            "whole_node_kwh": 30.427899981804128,
+            "energy_ratio_node_vs_cpu_pure": 0.17481491707789726
+          }
+        }
+      }
+    }
+  }
+}

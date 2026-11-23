@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+*.o
+
+# Simulation binaries and large snapshots
+*.bin
+*.hdf5
+*.h5
+*.partial*
+*.tmp
+
+# LaTeX build artifacts (keep paper/*.pdf if built, or exclude intermediates)
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out
+paper/*.toc
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.synctex.gz
+paper/*Notes.bib
+paper/_preview/
+
+# OS
+.DS_Store

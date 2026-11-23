@@ -1,0 +1,22 @@
+{
+  "source": "Archival CHPC PL_25_1024 timesteps, last clean row per step",
+  "start_snapshot": "0044",
+  "end_snapshot": "0045",
+  "cpu_threads": 256,
+  "first_step": 7804,
+  "last_step": 8392,
+  "steps": 589,
+  "sum_step_s": 33863.741499,
+  "end_snapshot_dump_step": 8392,
+  "end_snapshot_dump_step_s": 1366.535625,
+  "without_pm": {
+    "steps": 552,
+    "sum_step_s": 26855.410953,
+    "median_s": 41.2408185
+  },
+  "with_pm": {
+    "steps": 37,
+    "sum_step_s": 7008.330546,
+    "median_s": 189.104766
+  }
+}
