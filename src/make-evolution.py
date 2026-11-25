@@ -175,6 +175,33 @@ __global__ void key_particles_fast_slab(const double3* x, int n, int slab_x,
   key|=(expand_bits_21(ix)<<2)|(expand_bits_21(iy)<<1)|expand_bits_21(iz);
   keys[i]=key; order[i]=i;
 }
+
+__global__ void key_particles_fast_3d(const double3* x, int n,
+                                      const int* cell_to_slot, probe_header h,
+                                      Key* keys, int* order) {
+  const int i=blockIdx.x*blockDim.x+threadIdx.x;
+  if (i>=n) return;
+  const double3 pos=x[i];
+  constexpr double scale=double(1u<<PROBE_LEVELS);
+  constexpr uint32_t max_q=(1u<<PROBE_LEVELS)-1u;
+  auto quantize=[&](double q) -> uint32_t {
+    return q<=0.0?0u:(q>=scale?max_q:uint32_t(q));
+  };
+  const double sx=pos.x*h.inv_width[0];
+  const int tx=min(max(int(sx),0),h.top[0]-1);
+  const uint32_t ix=quantize((sx-double(tx))*scale);
+  const double sy=pos.y*h.inv_width[1];
+  const int ty=min(max(int(sy),0),h.top[1]-1);
+  const uint32_t iy=quantize((sy-double(ty))*scale);
+  const double sz=pos.z*h.inv_width[2];
+  const int tz=min(max(int(sz),0),h.top[2]-1);
+  const uint32_t iz=quantize((sz-double(tz))*scale);
+  const int cid=(tx*h.top[1]+ty)*h.top[2]+tz;
+  const int local_top=max(cell_to_slot[cid],0);
+  Key key=Key(local_top)<<octree_shift;
+  key|=(expand_bits_21(ix)<<2)|(expand_bits_21(iy)<<1)|expand_bits_21(iz);
+  keys[i]=key; order[i]=i;
+}
 """
 with (build/"src/validated_device_tree.cuh").open("a") as output:
     output.write("\n"+kernel+"\n"+fast_keys)
@@ -372,7 +399,7 @@ __global__ void multipoles_fast(const Geometry* geometry,ForceNode* force_nodes,
 __global__ void multipoles_fast_slab(const Geometry* geometry,ForceNode* force_nodes,
     double3* node_com,const double3* x_in,const float* mass_or_null,float uniform_mass,
     float uniform_soft,const int* sorted,int level,int slab_x,probe_header h,
-    const int* levels) {{
+    const int* levels,const float* soft_or_null=nullptr) {{
   const int begin=levels[level];
   const int end=levels[level+1];
   const int i=begin+blockIdx.x*blockDim.x+threadIdx.x;
@@ -405,7 +432,7 @@ __global__ void multipoles_fast_slab(const Geometry* geometry,ForceNode* force_n
 
   float moments[PROBE_TERMS]={{}};
   double com[3]={{}};
-  float radius=0.f,soft=uniform_soft,mass=0.f;
+  float radius=0.f,soft=soft_or_null?0.f:uniform_soft,mass=0.f;
 
   if(leaf) {{
     float rel_cx=0.f,rel_cy=0.f,rel_cz=0.f;
@@ -413,6 +440,137 @@ __global__ void multipoles_fast_slab(const Geometry* geometry,ForceNode* force_n
       const int pid=sorted[j];
       const double3 pos=x_in[pid];
       const float mp=mass_or_null?mass_or_null[pid]:uniform_mass;
+      if(soft_or_null) soft=fmaxf(soft,soft_or_null[pid]);
+      mass+=mp;
+      rel_cx+=mp*float(pos.x-lower[0]);
+      rel_cy+=mp*float(pos.y-lower[1]);
+      rel_cz+=mp*float(pos.z-lower[2]);
+    }}
+    const float inv_m=1.f/mass;
+    const float com_rel[3]={{rel_cx*inv_m,rel_cy*inv_m,rel_cz*inv_m}};
+    com[0]=lower[0]+double(com_rel[0]);
+    com[1]=lower[1]+double(com_rel[1]);
+    com[2]=lower[2]+double(com_rel[2]);
+    float radius2=0.f;
+    for(int j=geom.start;j<geom.end;++j) {{
+      const int pid=sorted[j];
+      const double3 pos=x_in[pid];
+      const float mp=mass_or_null?mass_or_null[pid]:uniform_mass;
+      const float dx[3]={{
+          com_rel[0]-float(pos.x-lower[0]),
+          com_rel[1]-float(pos.y-lower[1]),
+          com_rel[2]-float(pos.z-lower[2])}};
+      radius2=fmaxf(radius2,dx[0]*dx[0]+dx[1]*dx[1]+dx[2]*dx[2]);
+      float px[5],py[5],pz[5];
+#pragma unroll
+      for(int k=0;k<5;++k) {{
+        px[k]=powers_f(dx[0],k);
+        py[k]=powers_f(dx[1],k);
+        pz[k]=powers_f(dx[2],k);
+      }}
+{leaf_acc}
+    }}
+    radius=sqrtf(radius2);
+  }} else {{
+    double dm=0.0;
+    for(int child:geom.children) {{
+      if(child<0) continue;
+      const float cm=force_nodes[child].m.M_000;
+      const double3 ccom=node_com[child];
+      dm+=double(cm);
+      com[0]+=double(cm)*ccom.x;
+      com[1]+=double(cm)*ccom.y;
+      com[2]+=double(cm)*ccom.z;
+    }}
+    const double inv_dm=1.0/dm;
+    com[0]*=inv_dm; com[1]*=inv_dm; com[2]*=inv_dm;
+    float total_m=0.f;
+    for(int child:geom.children) {{
+      if(child<0) continue;
+      const ForceNode& cf=force_nodes[child];
+      const double3 ccom=node_com[child];
+      const float dx[3]={{float(com[0]-ccom.x),float(com[1]-ccom.y),float(com[2]-ccom.z)}};
+      radius=fmaxf(radius,cf.center.w+sqrtf(dx[0]*dx[0]+dx[1]*dx[1]+dx[2]*dx[2]));
+      soft=fmaxf(soft,cf.m.max_softening);
+      total_m+=cf.m.M_000;
+      float px[5],py[5],pz[5];
+#pragma unroll
+      for(int k=0;k<5;++k) {{
+        px[k]=powers_f(dx[0],k);
+        py[k]=powers_f(dx[1],k);
+        pz[k]=powers_f(dx[2],k);
+      }}
+      float translated;
+{m2m_str}
+    }}
+    mass=total_m;
+    double sq=0.0;
+    for(int a=0;a<3;++a) {{
+      const double d=fmax(com[a]-lower[a],lower[a]+width[a]-com[a]);
+      sq+=d*d;
+    }}
+    radius=fminf(radius,float(sqrt(sq)));
+  }}
+  moments[0]=mass;
+  node_com[i]={{com[0],com[1],com[2]}};
+  fn.center={{float(com[0]),float(com[1]),float(com[2]),radius}};
+  fn.m.max_softening=soft;
+  fn.m.power[0]=mass;
+  fn.m.power[2]=sqrtf({p2_expr});
+{assign_str}
+}}
+
+__global__ void multipoles_fast_3d(const Geometry* geometry,ForceNode* force_nodes,
+    double3* node_com,const double3* x_in,const float* mass_or_null,float uniform_mass,
+    float uniform_soft,const int* sorted,int level,const int* slot_to_cell,probe_header h,
+    const int* levels,const float* soft_or_null=nullptr) {{
+  const int begin=levels[level];
+  const int end=levels[level+1];
+  const int i=begin+blockIdx.x*blockDim.x+threadIdx.x;
+  if(i>=end) return;
+  const auto& geom=geometry[i];
+  const int count=geom.end-geom.start;
+  ForceNode& fn=force_nodes[i];
+  fn.n=count;
+  if(!count) {{
+    fn.center={{}};
+    fn.m={{}};
+    node_com[i]={{}};
+    return;
+  }}
+  const int local_top=geom.key>>octree_shift;
+  const int cid=slot_to_cell[local_top];
+  const int yz_stride=h.top[1]*h.top[2];
+  const int tx=cid/yz_stride;
+  const int rem=cid%yz_stride;
+  const int ty=rem/h.top[2];
+  const int tz=rem%h.top[2];
+  double lower[3]={{
+      double(tx)*h.width[0],
+      double(ty)*h.width[1],
+      double(tz)*h.width[2]}};
+  double width[3]={{h.width[0],h.width[1],h.width[2]}};
+  for(int l=1;l<=level;++l) {{
+    const int child=(geom.key>>(3*(PROBE_LEVELS-l)))&7;
+    for(int a=0;a<3;++a) {{
+      width[a]*=0.5;
+      if(child&(4>>a)) lower[a]+=width[a];
+    }}
+  }}
+  bool leaf=true;
+  for(int child:geom.children) leaf&=child<0;
+
+  float moments[PROBE_TERMS]={{}};
+  double com[3]={{}};
+  float radius=0.f,soft=soft_or_null?0.f:uniform_soft,mass=0.f;
+
+  if(leaf) {{
+    float rel_cx=0.f,rel_cy=0.f,rel_cz=0.f;
+    for(int j=geom.start;j<geom.end;++j) {{
+      const int pid=sorted[j];
+      const double3 pos=x_in[pid];
+      const float mp=mass_or_null?mass_or_null[pid]:uniform_mass;
+      if(soft_or_null) soft=fmaxf(soft,soft_or_null[pid]);
       mass+=mp;
       rel_cx+=mp*float(pos.x-lower[0]);
       rel_cy+=mp*float(pos.y-lower[1]);

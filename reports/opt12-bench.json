@@ -1,0 +1,64 @@
+{
+  "o1_ab_256": {
+    "base_evo_s": 88.307443753,
+    "lazy_evo_s": 85.817078963,
+    "base_tree_s": 9.961396704194497,
+    "lazy_tree_s": 1.5806963790671094,
+    "base_force_s": 54.18008608281496,
+    "lazy_force_s": 59.23649029887184,
+    "lazy_steps": 279,
+    "full_rebuilds": 33,
+    "med_dx_mpc": 6.375606413000171e-07,
+    "p95_dx_mpc": 0.0005498878267537078,
+    "max_dx_mpc": 0.06219989276271636,
+    "rel_v_rms_diff": 0.00011589098365567501,
+    "lazy_fc_step0": {
+      "step": 0,
+      "a": 0.855084315527,
+      "n": 128,
+      "mode": "ewald",
+      "short_med_rel": 0.00138201031558,
+      "short_p95_rel": 0.0181611359561,
+      "short_max_rel": 0.165662990934,
+      "total_med_rel": 0.00139907551836,
+      "total_p95_rel": 0.00661915422026,
+      "total_max_rel": 0.0268241702333,
+      "wall_ms": 7924.46754
+    },
+    "lazy_fc_final": {
+      "step": 311,
+      "a": 0.92,
+      "n": 128,
+      "mode": "ewald",
+      "short_med_rel": 0.000289775371377,
+      "short_p95_rel": 0.0141958284585,
+      "short_max_rel": 0.70942091237,
+      "total_med_rel": 0.00110138489764,
+      "total_p95_rel": 0.00624441557784,
+      "total_max_rel": 0.00846107729458,
+      "wall_ms": 8916.07727297
+    }
+  },
+  "o2_lc_lazy_256": {
+    "evo_wall_s": 71.928585747,
+    "step_wall_sum_s": 70.19308558466845,
+    "drift_s": 4.01424470788415,
+    "tree_s": 1.5815482946350405,
+    "lazy_steps": 279,
+    "full_rebuilds": 33,
+    "hits": 31023535,
+    "outer_hits": 23822112,
+    "shell_5_15_vs_snap": 1.0002917019317268,
+    "shell_15_25_vs_snap": 1.0000962847553483
+  },
+  "o3_compaction_stress": {
+    "particles": 262144,
+    "total_migrants": 294912,
+    "max_pos_err_vs_analytic_mpc": 7.0432339377308385e-09
+  },
+  "o4_kepler_isolated": {
+    "dE_rel": 4.091247001181131e-06,
+    "dL_rel": 2.0456196190288267e-06,
+    "dx_return": 3.0489895090356434e-05
+  }
+}
