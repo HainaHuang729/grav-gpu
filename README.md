@@ -165,8 +165,27 @@ swift-treepm-gpu/
 │   └── make_opt_comparison_figures.py # CPU-vs-GPU speed & accuracy comparison plots (fig5-fig6)
 ├── slurm/                          # Parameterized Slurm job templates
 ├── reports/                        # Verified opt12..opt5 JSON benchmarks, 256^3/1024^3 CPU accuracy CSV/JSONs & native-092.time
-└── paper/                          # Physical Review D (revtex4-2) manuscript, BibTeX & figures
+├── paper/                          # Physical Review D (revtex4-2) manuscript, BibTeX & figures
+└── index.html                      # Interactive benchmark & accuracy showcase page
 ```
+
+---
+
+## Roadmap
+
+### Completed (DMO Gravity + FoF Pipeline)
+- [x] Lazy octree refit, async lightcone host writes, and CUB migrant compaction
+- [x] Split traversal / M2P / M2L / P2P zero-spill kernels (`SWIFT_SPLIT_FORCE=1`)
+- [x] Pure-CUDA distributed multi-GPU FFT PM solver (`SWIFT_PM_DIST=1`)
+- [x] 3D `12×12×12` Hilbert/ORB domain decomposition, dynamic rebalancing, and compute/communication overlap
+- [x] Full-GPU FoF, cross-slab GPU merge, multi-GPU 3D inline FoF, Catalog, and SO (`M200c/R200c`, `M200m/R200m`)
+
+### Planned Extensions
+- [ ] **Multi-Node MPI + GPU-Direct RDMA**: Extend 3D domain decomposition and distributed FFT PM across nodes to scale from $1024^3$ to $2048^3$–$4096^3$.
+- [ ] **SPH Hydrodynamics (`PartType0`)**: Port SPHENIX neighbor search, smoothing-length iteration, density loop, and hydro force/thermodynamics kernels to GPU.
+- [ ] **Baryonic Subgrid Physics (`PartType4/5`)**: Add radiative cooling, star formation, stellar/SN feedback, and black hole accretion/AGN feedback.
+- [ ] **Online Diagnostics & Direct I/O**: Compute $P_\delta(k)$ / $P_\theta(k)$ on-GPU during evolution and support direct C/CUDA HDF5 snapshot writes without `.bin` staging.
+- [ ] **Beyond-$\Lambda$CDM Physics**: Support massive neutrino species and modified-gravity force kernels.
 
 ---
 
