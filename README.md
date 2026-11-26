@@ -1,8 +1,8 @@
-# `swift-treepm-gpu`: Multi-GPU VRAM-Resident CUDA TreePM + Full-GPU FoF Engine
+# `grav-gpu`: Multi-GPU VRAM-Resident CUDA TreePM + Full-GPU FoF Engine
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-`swift-treepm-gpu` is a multi-GPU CUDA TreePM cosmological gravity, lightcone, and Full-GPU Friends-of-Friends (FoF / Catalog / Spherical Overdensity) solver designed to evolve from $64^3$ smoke tests up to **$1024^3$ (`1,073,741,824`)** particles **100% resident inside GPU VRAM** (`4× NVIDIA RTX A6000`, `4 × 48 GiB`) without host-device swapping.
+`grav-gpu` is a multi-GPU CUDA TreePM cosmological gravity, lightcone, and Full-GPU Friends-of-Friends (FoF / Catalog / Spherical Overdensity) solver designed to evolve from $64^3$ smoke tests up to **$1024^3$ (`1,073,741,824`)** particles **100% resident inside GPU VRAM** (`4× NVIDIA RTX A6000`, `4 × 48 GiB`) without host-device swapping.
 
 ---
 
@@ -137,7 +137,7 @@ All templates read `SWIFT_BUILD_DIR`, `DATA_DIR`, `CUDA_HOME`, `CXX_BIN`, and `P
 ## Repository Structure
 
 ```text
-swift-treepm-gpu/
+grav-gpu/
 ├── Makefile                        # Turnkey build & smoke targets (fof, pm, cic, engine, smoke)
 ├── src/
 │   ├── multi_gpu_slab.cu           # Multi-GPU TreePM driver (1d_slab + 3D domain modes)

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>swift-treepm-gpu — Multi-GPU VRAM-Resident CUDA TreePM &amp; FoF Engine</title>
+  <title>grav-gpu — Multi-GPU VRAM-Resident CUDA TreePM &amp; FoF Engine</title>
   <style>
     :root {
       --bg: #f6f8fb;
@@ -294,6 +294,7 @@
     .data-table td.num,
     .data-table th.num {
       text-align: right;
+      white-space: nowrap;
     }
     .data-table tr.highlight {
       background: #fff7ed;
@@ -356,14 +357,14 @@
   <div class="wrap">
     <header>
       <div>
-        <h1>swift-treepm-gpu</h1>
+        <h1>grav-gpu</h1>
         <p class="subtitle">
           100% VRAM-resident multi-GPU CUDA TreePM &amp; Full-GPU FoF solver, built for 4 &times; RTX A6000 (NVLink) and 1024&sup3; billion-particle cosmology.
         </p>
       </div>
       <div class="header-actions">
         <a class="lang-link" href="index.html">中文</a>
-        <a class="repo-link" href="https://github.com/HainaHuang729/swift-treepm-gpu" target="_blank" rel="noopener">GitHub Repo</a>
+        <a class="repo-link" href="https://github.com/HainaHuang729/grav-gpu" target="_blank" rel="noopener">GitHub Repo</a>
       </div>
     </header>
 
@@ -399,6 +400,7 @@
           <button class="tab-btn" role="tab" aria-selected="true" data-bench="b256">256&sup3; &middot; 16.78M</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-bench="b1024">1024&sup3; &middot; 1.07B</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-bench="bfof">FoF / Catalog / SO</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-bench="bcons">Conservation &amp; z=200&rarr;0</button>
         </div>
       </div>
 
@@ -498,6 +500,54 @@
       </table>
     </section>
 
+    <!-- Conservation & Full-History Gate Table -->
+    <section>
+      <div class="sec-head">
+        <h2>Conservation &amp; Full-History Verification</h2>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Physics Gate</th>
+            <th class="num">Runtime / Steps</th>
+            <th class="num">Energy Residual</th>
+            <th class="num">Momentum Drift</th>
+            <th class="num">Spectra / Halo Parity</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>256&sup3; Full History z=200&rarr;0</strong> (4&times; A6000 3D)</td>
+            <td class="num">526.6 s &middot; 9,257 steps</td>
+            <td class="num"><span class="pill ok">0.0307%</span> (L-I)</td>
+            <td class="num">3.72 &times; 10<sup>&minus;5</sup></td>
+            <td class="num">P<sub>&delta;</sub> 0.123% &middot; N&ge;10k: 89/89</td>
+          </tr>
+          <tr>
+            <td><strong>256&sup3; Late 0054&rarr;0056</strong> (4&times; A6000 Eager)</td>
+            <td class="num">47.3 s &middot; 914 steps</td>
+            <td class="num"><span class="pill ok">0.0159%</span> (L-I)</td>
+            <td class="num">2.34 &times; 10<sup>&minus;5</sup></td>
+            <td class="num">P<sub>&delta;</sub> 0.066% &middot; N&ge;300: 1944/1944</td>
+          </tr>
+          <tr>
+            <td><strong>32K Isolated Plummer Sphere</strong> (t=0&rarr;4.0)</td>
+            <td class="num">2.59 s &middot; 33 checks</td>
+            <td class="num"><span class="pill ok">1.15 &times; 10<sup>&minus;5</sup></span> (|&Delta;E/E<sub>0</sub>|)</td>
+            <td class="num">6.38 &times; 10<sup>&minus;6</sup></td>
+            <td class="num">Virial 2T/|U| = 0.996&ndash;0.999</td>
+          </tr>
+          <tr>
+            <td><strong>4-GPU 3D vs 1-GPU 1D Step-0 Force</strong></td>
+            <td class="num">16.78M particles</td>
+            <td class="num">Pot med 8.88 &times; 10<sup>&minus;6</sup></td>
+            <td class="num">Face med 1.15 &times; 10<sup>&minus;4</sup></td>
+            <td class="num"><span class="pill ok">Force med 1.03 &times; 10<sup>&minus;4</sup></span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <!-- Quick Start -->
     <section>
       <div class="sec-head">
@@ -509,7 +559,7 @@ python3 scripts/make_opt_comparison_figures.py</pre>
     </section>
 
     <footer>
-      <span>swift-treepm-gpu &middot; 4 &times; NVIDIA RTX A6000 (NVLink4) vs. 256-Core CPU SWIFT</span>
+      <span>grav-gpu &middot; 4 &times; NVIDIA RTX A6000 (NVLink4) vs. 256-Core CPU SWIFT</span>
       <span>MIT License &middot; Haina Huang (CUHK)</span>
     </footer>
   </div>
@@ -562,6 +612,22 @@ python3 scripts/make_opt_comparison_figures.py</pre>
           ["SO M200/R200 Max Rel Error", "≤ 3.67 × 10⁻¹⁵"],
           ["SO Non-Uniform Speedup", "5.37× (0.294 s vs 1.580 s)"],
           ["Distributed 256³ PM FFT", "4.03× (4G 217 ms vs 1G 875 ms)"]
+        ]
+      },
+      bcons: {
+        bars: [
+          { name: "1% Precision Threshold Reference", stat: "0.01 (1.0%)", pct: 100, color: "#cbd5e1" },
+          { name: "z=200→0 Layzer–Irvine Residual (9,257 steps)", stat: "0.0307% (3.07×10⁻⁴)", pct: 3.07, color: "var(--signal)" },
+          { name: "0054→0056 Layzer–Irvine Residual (914 steps)", stat: "0.0159% (1.59×10⁻⁴)", pct: 1.59, color: "var(--cobalt)" },
+          { name: "32K Isolated Plummer Energy |ΔE/E₀|", stat: "0.00115% (1.15×10⁻⁵)", pct: 0.4, color: "var(--emerald)" }
+        ],
+        metrics: [
+          ["z=200→0 Wall Time / Steps", "526.65 s · 9,257 steps (16 rebalances)"],
+          ["z=200→0 z=0 P_δ(k) / Halos", "0.123% · N≥10k: 89/89, N≥100k: 18/18"],
+          ["z=200→0 Momentum / Mass Drift", "3.72 × 10⁻⁵ / 0.0 (exact conservation)"],
+          ["Plummer Virial 2T/|U| (t=0→4)", "0.9956 → 0.9988 (mom drift 6.38×10⁻⁶)"],
+          ["4G 3D vs 1G 1D Step-0 Force", "All med 1.03×10⁻⁴ · Face med 1.15×10⁻⁴"],
+          ["0054→0056 HMF Parity (N≥300)", "1,944 vs 1,944 (0.0% median diff)"]
         ]
       }
     };

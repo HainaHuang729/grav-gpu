@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>swift-treepm-gpu — 多卡常驻显存 CUDA TreePM & FoF 引擎</title>
+  <title>grav-gpu — 多卡常驻显存 CUDA TreePM &amp; FoF 引擎</title>
   <style>
     :root {
       --bg: #f6f8fb;
@@ -293,6 +293,7 @@
     .data-table td.num,
     .data-table th.num {
       text-align: right;
+      white-space: nowrap;
     }
     .data-table tr.highlight {
       background: #fff7ed;
@@ -355,14 +356,14 @@
   <div class="wrap">
     <header>
       <div>
-        <h1>swift-treepm-gpu</h1>
+        <h1>grav-gpu</h1>
         <p class="subtitle">
           100% 显存常驻的多卡 CUDA TreePM 与全 GPU FoF 宇宙学引力求解器，面向 4 × RTX A6000（NVLink）与 1024³ 十亿粒子级演化。
         </p>
       </div>
       <div class="header-actions">
         <a class="lang-link" href="en.html">EN</a>
-        <a class="repo-link" href="https://github.com/HainaHuang729/swift-treepm-gpu" target="_blank" rel="noopener">GitHub 仓库</a>
+        <a class="repo-link" href="https://github.com/HainaHuang729/grav-gpu" target="_blank" rel="noopener">GitHub 仓库</a>
       </div>
     </header>
 
@@ -393,11 +394,12 @@
     <!-- Interactive Benchmark Switcher -->
     <section>
       <div class="sec-head">
-        <h2>实测对比：GPU 优化引擎 vs. CPU SWIFT</h2>
+        <h2>实测对比：GPU 引擎 vs. CPU SWIFT</h2>
         <div class="tabs" role="tablist" aria-label="基准规模切换">
           <button class="tab-btn" role="tab" aria-selected="true" data-bench="b256">256³ · 1678 万粒子</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-bench="b1024">1024³ · 10.7 亿粒子</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-bench="bfof">FoF / Catalog / SO</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-bench="bcons">守恒与 z=200→0</button>
         </div>
       </div>
 
@@ -497,6 +499,54 @@
       </table>
     </section>
 
+    <!-- Conservation & Full-History Gate Table -->
+    <section>
+      <div class="sec-head">
+        <h2>物理守恒与全历史演化校验</h2>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>测试项目</th>
+            <th class="num">演化耗时 / 步数</th>
+            <th class="num">能量守恒残差</th>
+            <th class="num">动量漂移</th>
+            <th class="num">功率谱 / 暗晕核对</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>256³ 全宇宙 z=200→0</strong>（4× A6000 3D）</td>
+            <td class="num">526.6 s · 9,257 步</td>
+            <td class="num"><span class="pill ok">0.0307%</span>（L-I）</td>
+            <td class="num">3.72 × 10⁻⁵</td>
+            <td class="num">P<sub>δ</sub> 0.123% · N≥10k: 89/89</td>
+          </tr>
+          <tr>
+            <td><strong>256³ 晚期 0054→0056</strong>（4× A6000 Eager）</td>
+            <td class="num">47.3 s · 914 步</td>
+            <td class="num"><span class="pill ok">0.0159%</span>（L-I）</td>
+            <td class="num">2.34 × 10⁻⁵</td>
+            <td class="num">P<sub>δ</sub> 0.066% · N≥300: 1944/1944</td>
+          </tr>
+          <tr>
+            <td><strong>32K 孤立 Plummer 平衡球</strong>（t=0→4.0）</td>
+            <td class="num">2.59 s · 33 检测点</td>
+            <td class="num"><span class="pill ok">1.15 × 10⁻⁵</span>（|ΔE/E₀|）</td>
+            <td class="num">6.38 × 10⁻⁶</td>
+            <td class="num">维里比 2T/|U| = 0.996–0.999</td>
+          </tr>
+          <tr>
+            <td><strong>4-GPU 3D vs 1-GPU 1D 第 0 步力场</strong></td>
+            <td class="num">16.78M 粒子</td>
+            <td class="num">势能中位 8.88 × 10⁻⁶</td>
+            <td class="num">边界面 1.15 × 10⁻⁴</td>
+            <td class="num"><span class="pill ok">力中位 1.03 × 10⁻⁴</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <!-- Quick Start -->
     <section>
       <div class="sec-head">
@@ -508,7 +558,7 @@ python3 scripts/make_opt_comparison_figures.py</pre>
     </section>
 
     <footer>
-      <span>swift-treepm-gpu · 4 × NVIDIA RTX A6000 (NVLink4) vs. 256-Core CPU SWIFT</span>
+      <span>grav-gpu · 4 × NVIDIA RTX A6000 (NVLink4) vs. 256-Core CPU SWIFT</span>
       <span>MIT License · Haina Huang (CUHK)</span>
     </footer>
   </div>
@@ -561,6 +611,22 @@ python3 scripts/make_opt_comparison_figures.py</pre>
           ["SO M200/R200 最大相对误差", "≤ 3.67 × 10⁻¹⁵"],
           ["SO 非均匀质量/软化加速比", "5.37× (0.294 s vs 1.580 s)"],
           ["Distributed 256³ PM FFT", "4.03× (4G 217 ms vs 1G 875 ms)"]
+        ]
+      },
+      bcons: {
+        bars: [
+          { name: "1% 物理精度红线参考", stat: "0.01 (1.0%)", pct: 100, color: "#cbd5e1" },
+          { name: "z=200→0 Layzer–Irvine 残差 (9,257 步)", stat: "0.0307% (3.07×10⁻⁴)", pct: 3.07, color: "var(--signal)" },
+          { name: "0054→0056 Layzer–Irvine 残差 (914 步)", stat: "0.0159% (1.59×10⁻⁴)", pct: 1.59, color: "var(--cobalt)" },
+          { name: "32K 孤立 Plummer 能量误差 |ΔE/E₀|", stat: "0.00115% (1.15×10⁻⁵)", pct: 0.4, color: "var(--emerald)" }
+        ],
+        metrics: [
+          ["z=200→0 演化耗时 / 步数", "526.65 s · 9,257 步 (16 次重平衡)"],
+          ["z=200→0 z=0 P_δ(k) / 暗晕", "0.123% · N≥10k: 89/89, N≥100k: 18/18"],
+          ["z=200→0 线动量 / 质量漂移", "3.72 × 10⁻⁵ / 0.0 (零粒子丢失)"],
+          ["Plummer 维里比 2T/|U| (t=0→4)", "0.9956 → 0.9988 (动量漂移 6.38×10⁻⁶)"],
+          ["4 卡 3D vs 1 卡 1D 第 0 步力", "全盒中位 1.03×10⁻⁴ · 边界面 1.15×10⁻⁴"],
+          ["0054→0056 HMF (N≥300)", "1,944 vs 1,944 (中位差异 0.0%)"]
         ]
       }
     };
