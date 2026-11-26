@@ -40,10 +40,32 @@
 
 ![Accuracy vs CPU](paper/figures/fig6_accuracy_vs_cpu.png)
 
-To regenerate all CPU-vs-GPU comparison figures and manuscript figures from `reports/`:
+---
+
+### Cross-Code Runtime, Energy Cost & Accuracy ($256^3$, $a = 0.855 \to 0.92$)
+
+All codes below were benchmarked on the same `phy-gpus` node `a9` (`2× AMD EPYC 9754` 256 cores, `5× NVIDIA RTX A6000`) from the exact same `16,777,216`-particle `L = 25 Mpc/h` snapshot with matched opening angle ($\theta = 0.70$), comoving softening ($\epsilon = 0.001953125\ \text{Mpc}/h$), and timestep factor ($\eta_G = 0.025$ / PKDGRAV3 `dEta = 0.2236068`). GPU power is directly measured via `200 ms` `nvidia-smi` NVML polling; because `a9` lacks unprivileged RAPL `powercap`, host/CPU energy is reported transparently as modeled whole-node power (`+120 W` base host for GPU runs; utilization-scaled `120–800 W` and flat `700 W` reference for dual-socket EPYC CPU runs). Full telemetry is saved in [reports/code-energy-comparison.json](reports/code-energy-comparison.json).
+
+| Code & Configuration | Wall / Evo Time | Evo Speedup vs. SWIFT | Measured GPU Energy (Wh) | Whole-Node Energy (Wh) | Max $P_\delta(k)$ Dev & FoF HMF |
+| --- | --- | --- | --- | --- | --- |
+| **PKDGRAV3 3.5.1** (`1× A6000`, `-np 1 -sz 16`) | `2043.2 s` / `1926.3 s` | `0.41×` | `38.57 Wh` (`67.9 W`) | `106.68 Wh` | `0.150%` (`10k`: `91/92`, `100k`: `17/17`) |
+| **PKDGRAV3 3.5.1** (`2× A6000 MPI`, `-np 2 -sz 16`) | `1333.2 s` / `1223.6 s` | `0.65×` | `50.45 Wh` (`136.2 W`) | `94.89 Wh` | `0.150%` (`10k`: `91/92`, `100k`: `17/17`) |
+| **GADGET-4** (`128` EPYC cores MPI TreePM) | `883.2 s` / `857.7 s` | `0.93×` | — | `110.70 Wh` (`700W`: `171.7 Wh`) | `0.187%` (`10k`: `92/92`, `100k`: `17/17`) |
+| **CPU SWIFT** (`256T` EPYC FMM+PM baseline) | `816.0 s` / `796.4 s` | `1.00×` | — | `136.16 Wh` (`700W`: `158.7 Wh`) | Reference (`92`, `17`) |
+| **`grav-gpu` `1× A6000`** (3D Hilbert Lazy) | `58.09 s` / `50.03 s` | **`15.9×`** | **`3.93 Wh`** (`241.3 W`) | **`5.86 Wh`** (`23.2×` savings) | `0.0387%` (`10k`: `92/92`, `100k`: `17/17`) |
+| **`grav-gpu` `2× A6000`** (3D Hilbert Lazy) | `33.11 s` / `28.66 s` | **`27.8×`** | **`4.17 Wh`** (`448.1 W`) | **`5.27 Wh`** (**`25.8×`** lowest) | `0.0387%` (`10k`: `92/92`, `100k`: `17/17`) |
+| **`grav-gpu` `4× A6000`** (3D Hilbert Eager) | `30.21 s` / `21.07 s` | **`37.8×`** | `5.38 Wh` (`635.2 W`) | `6.39 Wh` (`21.3×` savings) | **`0.00106%`** (`92/92`, `17/17`) |
+| **`grav-gpu` `4× A6000`** (3D Hilbert Lazy) | **`28.26 s` / `18.99 s`** | **`41.9×`** (`28.9×` wall) | `5.25 Wh` (`662.7 W`) | `6.19 Wh` (`22.0×` / `25.6×` @700W) | `0.0387%` (`92/92`, `100k`: `17/17`) |
+
+> **Why PKDGRAV3 spends more wall time than `grav-gpu` at $256^3$**: PKDGRAV3 offloads FMM+Ewald gravity tiles to GPUs while rebuilding domain decompositions (`67×`, `425.95 s` on `1G` / `278.91 s` on `2G-MPI`) and CPU trees (`245×`, `522.19 s` / `145.87 s`) on host threads across `244` adaptive substeps (`3.3–5.6%` mean GPU utilization). Keeping all `16.78M` particles GPU-resident with TreePM + lazy Hilbert octree refits (`42.7–73.6%` GPU utilization) yields **`29×` faster wall time** and **`18–26×` lower whole-node energy**. On $1024^3$ full-history ($z=200\to0$), live `4× A6000` power measures `657.1–735.9 W`, reducing full-run node energy from `213.1 kWh` to `28.3–29.5 kWh` (`-86%`).
+
+![Cross-Code Runtime, Energy & Accuracy](paper/figures/fig7_code_energy_comparison.png)
+
+To regenerate all CPU-vs-GPU and cross-code comparison figures from `reports/`:
 
 ```bash
 python3 scripts/make_opt_comparison_figures.py
+python3 scripts/make_code_energy_figure.py
 python3 scripts/make_figures.py
 ```
 
@@ -164,9 +186,10 @@ grav-gpu/
 │   ├── eval_1024_snapshot.py       # P(k), P_theta(k), halo mass function & kick-alignment analyzer
 │   ├── model_1024_full_history.py  # Full-history z=200->0 scaling & energy model
 │   ├── make_figures.py             # Manuscript figure generator (fig1-fig4)
-│   └── make_opt_comparison_figures.py # CPU-vs-GPU speed & accuracy comparison plots (fig5-fig6)
+│   ├── make_opt_comparison_figures.py # CPU-vs-GPU speed & accuracy comparison plots (fig5-fig6)
+│   └── make_code_energy_figure.py  # Cross-code runtime, NVML energy & accuracy plot (fig7)
 ├── slurm/                          # Parameterized Slurm job templates
-├── reports/                        # Verified opt12..opt5 JSON benchmarks, 256^3/1024^3 CPU accuracy CSV/JSONs & native-092.time
+├── reports/                        # Verified opt12..opt5 & code-energy-comparison JSONs, P(k) CSVs & native-092.time
 ├── paper/                          # Physical Review D (revtex4-2) manuscript, BibTeX & figures
 └── index.html                      # Interactive benchmark & accuracy showcase page
 ```

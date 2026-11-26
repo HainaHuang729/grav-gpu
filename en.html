@@ -398,6 +398,7 @@
         <h2>Measured Benchmarks: GPU Engine vs. CPU SWIFT</h2>
         <div class="tabs" role="tablist" aria-label="Benchmark Scale">
           <button class="tab-btn" role="tab" aria-selected="true" data-bench="b256">256&sup3; &middot; 16.78M</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-bench="bcodes">Cross-Code Energy</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-bench="b1024">1024&sup3; &middot; 1.07B</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-bench="bfof">FoF / Catalog / SO</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-bench="bcons">Conservation &amp; z=200&rarr;0</button>
@@ -419,6 +420,7 @@
         <div class="tabs" role="tablist" aria-label="Figure Switcher">
           <button class="tab-btn" role="tab" aria-selected="true" data-fig="speed">Speedup &amp; Kernel Breakdown</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-fig="acc">Power Spectra &amp; Error Ladder</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-fig="codes">Cross-Code Time &amp; Energy</button>
         </div>
       </div>
 
@@ -548,6 +550,85 @@
       </table>
     </section>
 
+    <!-- Cross-Code Time & Energy Comparison -->
+    <section>
+      <div class="sec-head">
+        <h2>Cross-Code Runtime, NVML Energy &amp; Accuracy Comparison (256&sup3;, a = 0.855 &rarr; 0.920)</h2>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Code &amp; Hardware</th>
+            <th class="num">Wall / Evo Time</th>
+            <th class="num">Measured GPU Power / Wh</th>
+            <th class="num">Modeled Node Wh</th>
+            <th class="num">P<sub>&delta;</sub>(k) Dev &middot; HMF</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>PKDGRAV3 3.5.1 (1&times; A6000 &middot; GPU FMM)</td>
+            <td class="num">2043.2 s / 1926.3 s</td>
+            <td class="num">67.9 W &middot; 38.57 Wh</td>
+            <td class="num">106.68 Wh</td>
+            <td class="num"><span class="pill ok">0.150%</span> &middot; 91/92, 17/17</td>
+          </tr>
+          <tr>
+            <td>PKDGRAV3 3.5.1 (2&times; A6000 MPI)</td>
+            <td class="num">1333.2 s / 1223.6 s</td>
+            <td class="num">136.2 W &middot; 50.45 Wh</td>
+            <td class="num">94.89 Wh</td>
+            <td class="num"><span class="pill ok">0.150%</span> &middot; 91/92, 17/17</td>
+          </tr>
+          <tr>
+            <td>GADGET-4 (128 EPYC cores &middot; TreePM)</td>
+            <td class="num">883.2 s / 857.7 s</td>
+            <td class="num">&mdash;</td>
+            <td class="num">110.70 Wh (700W: 171.7 Wh)</td>
+            <td class="num"><span class="pill ok">0.187%</span> &middot; 92/92, 17/17</td>
+          </tr>
+          <tr>
+            <td>CPU SWIFT (256T EPYC baseline)</td>
+            <td class="num">816.0 s / 796.4 s</td>
+            <td class="num">&mdash;</td>
+            <td class="num">136.16 Wh (700W: 158.7 Wh)</td>
+            <td class="num">Reference &middot; 92, 17</td>
+          </tr>
+          <tr>
+            <td><strong>grav-gpu 1&times; A6000</strong> (3D Hilbert Lazy)</td>
+            <td class="num">58.09 s / 50.03 s</td>
+            <td class="num">241.3 W &middot; <strong>3.93 Wh</strong></td>
+            <td class="num"><strong>5.86 Wh</strong> (23.2&times; savings)</td>
+            <td class="num"><span class="pill ok">0.0387%</span> &middot; 92/92, 17/17</td>
+          </tr>
+          <tr>
+            <td><strong>grav-gpu 2&times; A6000</strong> (3D Hilbert Lazy)</td>
+            <td class="num">33.11 s / 28.66 s</td>
+            <td class="num">448.1 W &middot; 4.17 Wh</td>
+            <td class="num"><span class="pill best">5.27 Wh (25.8&times; savings)</span></td>
+            <td class="num"><span class="pill ok">0.0387%</span> &middot; 92/92, 17/17</td>
+          </tr>
+          <tr>
+            <td><strong>grav-gpu 4&times; A6000</strong> (3D Hilbert Eager)</td>
+            <td class="num">30.21 s / 21.07 s</td>
+            <td class="num">635.2 W &middot; 5.38 Wh</td>
+            <td class="num">6.39 Wh (21.3&times; savings)</td>
+            <td class="num"><span class="pill best">0.00106%</span> &middot; 92/92, 17/17</td>
+          </tr>
+          <tr class="highlight">
+            <td><strong>grav-gpu 4&times; A6000</strong> (3D Hilbert Lazy)</td>
+            <td class="num"><strong>28.26 s / 18.99 s</strong></td>
+            <td class="num">662.7 W &middot; 5.25 Wh</td>
+            <td class="num"><strong>6.19 Wh</strong> (22.0&ndash;25.6&times; savings)</td>
+            <td class="num"><span class="pill ok">0.0387%</span> &middot; 92/92, 17/17</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="margin-top:8px;font-size:0.84rem;color:var(--muted);">
+        Note: Same <code>a9</code> node (2&times; EPYC 9754 + RTX A6000) and matched accuracy settings (<code>&theta;=0.70</code>, <code>&eta;<sub>G</sub>=0.025</code> / PKDGRAV3 <code>dEta=0.2236</code>). GPU energy is integrated from 200 ms <code>nvidia-smi</code> NVML telemetry; since unprivileged RAPL is unavailable on <code>a9</code>, CPU/host power is modeled transparently (utilization-scaled 120&ndash;800 W plus flat 700 W CPU reference). At 256&sup3;, PKDGRAV3 is dominated by 67 host domain decompositions (279&ndash;426 s) and 245 CPU tree builds (146&ndash;522 s), leaving average GPU utilization at 3&ndash;6%.
+      </p>
+    </section>
+
     <!-- Quick Start -->
     <section>
       <div class="sec-head">
@@ -555,7 +636,7 @@
       </div>
       <pre>make standalone test-domain3d &amp;&amp; make test-fof
 make engine smoke KERNEL_BUILD_DIR=/path/to/swiftsim
-python3 scripts/make_opt_comparison_figures.py</pre>
+python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_code_energy_figure.py</pre>
     </section>
 
     <footer>
@@ -580,6 +661,25 @@ python3 scripts/make_opt_comparison_figures.py</pre>
           ["P_δ(k) Max Dev (Eager / Lazy)", "0.00106% / 0.03866%"],
           ["P_θ(k) Aligned Max Dev", "0.01978% / 0.05779%"],
           ["Median Position Error", "3.81 pc/h (min r > 0.99999993)"]
+        ]
+      },
+      bcodes: {
+        bars: [
+          { name: "CPU SWIFT (256T · 601 W / 700 W)", stat: "136.2 Wh · 816 s (1.0×)", pct: 100, color: "var(--cpu)" },
+          { name: "GADGET-4 (128C MPI · 451 W)", stat: "110.7 Wh · 883 s (1.2×)", pct: 81.3, color: "#475569" },
+          { name: "PKDGRAV3 (1× A6000 · NVML 38.6 Wh)", stat: "106.7 Wh · 2043 s (1.3×)", pct: 78.3, color: "#94a3b8" },
+          { name: "PKDGRAV3 (2× A6000 MPI · NVML 50.5 Wh)", stat: "94.9 Wh · 1333 s (1.4×)", pct: 69.7, color: "#64748b" },
+          { name: "grav-gpu 1× A6000 (NVML 3.93 Wh)", stat: "5.86 Wh · 58.1 s (23.2×)", pct: 4.3, color: "var(--cobalt)" },
+          { name: "grav-gpu 2× A6000 (NVML 4.17 Wh)", stat: "5.27 Wh · 33.1 s (25.8×)", pct: 3.9, color: "var(--emerald)" },
+          { name: "grav-gpu 4× A6000 (NVML 5.25 Wh)", stat: "6.19 Wh · 28.3 s (22.0×)", pct: 4.5, color: "var(--signal)" }
+        ],
+        metrics: [
+          ["Matched Physics", "a9 node · 256³ · a=0.855→0.92 · θ=0.70"],
+          ["GPU-Only Savings (vs SWIFT)", "34.7× (1G: 3.93 Wh vs 136.2 Wh)"],
+          ["Lowest Node Energy (2× A6000)", "5.27 Wh (-96.1%, 25.8× savings)"],
+          ["Fastest Wall Time (4× Lazy)", "18.99 s evo / 28.26 s wall (28.9×)"],
+          ["PKDGRAV3 256³ Bottleneck", "3–6% GPU util (CPU DD+Tree ~40–46%)"],
+          ["1024³ Live 4G Power Range", "657–736 W · 28.3–29.5 vs 213.1 kWh (-86%)"]
         ]
       },
       b1024: {
@@ -644,6 +744,12 @@ python3 scripts/make_opt_comparison_figures.py</pre>
         pdf: "paper/figures/fig6_accuracy_vs_cpu.pdf",
         alt: "CPU vs GPU Accuracy Comparison",
         desc: "256³ / 1024³ matter & momentum power residuals (well below 0.1%) and cross-subsystem error ladder."
+      },
+      codes: {
+        src: "paper/figures/fig7_code_energy_comparison.png",
+        pdf: "paper/figures/fig7_code_energy_comparison.pdf",
+        alt: "Cross-Code Runtime, Energy & Accuracy Comparison",
+        desc: "Runtime, measured NVML GPU + modeled whole-node energy (Wh), and P_δ(k) accuracy across SWIFT, GADGET-4, PKDGRAV3 (1G/2G MPI), and grav-gpu (1G/2G/4G) at 256³."
       }
     };
 

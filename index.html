@@ -397,6 +397,7 @@
         <h2>实测对比：GPU 引擎 vs. CPU SWIFT</h2>
         <div class="tabs" role="tablist" aria-label="基准规模切换">
           <button class="tab-btn" role="tab" aria-selected="true" data-bench="b256">256³ · 1678 万粒子</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-bench="bcodes">跨代码能耗对比</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-bench="b1024">1024³ · 10.7 亿粒子</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-bench="bfof">FoF / Catalog / SO</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-bench="bcons">守恒与 z=200→0</button>
@@ -418,6 +419,7 @@
         <div class="tabs" role="tablist" aria-label="图表切换">
           <button class="tab-btn" role="tab" aria-selected="true" data-fig="speed">速度与核函数拆解</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-fig="acc">全波数功率谱精度</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-fig="codes">跨代码时间与能耗</button>
         </div>
       </div>
 
@@ -547,6 +549,85 @@
       </table>
     </section>
 
+    <!-- Cross-Code Time & Energy Comparison -->
+    <section>
+      <div class="sec-head">
+        <h2>跨代码时间、实测 GPU 能耗与精度对比（256³，a = 0.855 → 0.920）</h2>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>程序与硬件配置</th>
+            <th class="num">总耗时 / 演化</th>
+            <th class="num">GPU 实测功耗 / 能耗</th>
+            <th class="num">整机建模能耗</th>
+            <th class="num">P<sub>δ</sub>(k) 偏差 · HMF</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>PKDGRAV3 3.5.1（1× A6000 · GPU FMM）</td>
+            <td class="num">2043.2 s / 1926.3 s</td>
+            <td class="num">67.9 W · 38.57 Wh</td>
+            <td class="num">106.68 Wh</td>
+            <td class="num"><span class="pill ok">0.150%</span> · 91/92, 17/17</td>
+          </tr>
+          <tr>
+            <td>PKDGRAV3 3.5.1（2× A6000 MPI）</td>
+            <td class="num">1333.2 s / 1223.6 s</td>
+            <td class="num">136.2 W · 50.45 Wh</td>
+            <td class="num">94.89 Wh</td>
+            <td class="num"><span class="pill ok">0.150%</span> · 91/92, 17/17</td>
+          </tr>
+          <tr>
+            <td>GADGET-4（128 核 EPYC · TreePM）</td>
+            <td class="num">883.2 s / 857.7 s</td>
+            <td class="num">—</td>
+            <td class="num">110.70 Wh (700W: 171.7 Wh)</td>
+            <td class="num"><span class="pill ok">0.187%</span> · 92/92, 17/17</td>
+          </tr>
+          <tr>
+            <td>CPU SWIFT（256 线程 EPYC 基线）</td>
+            <td class="num">816.0 s / 796.4 s</td>
+            <td class="num">—</td>
+            <td class="num">136.16 Wh (700W: 158.7 Wh)</td>
+            <td class="num">基准 · 92, 17</td>
+          </tr>
+          <tr>
+            <td><strong>grav-gpu 1× A6000</strong>（3D Hilbert Lazy）</td>
+            <td class="num">58.09 s / 50.03 s</td>
+            <td class="num">241.3 W · <strong>3.93 Wh</strong></td>
+            <td class="num"><strong>5.86 Wh</strong> (省 23.2×)</td>
+            <td class="num"><span class="pill ok">0.0387%</span> · 92/92, 17/17</td>
+          </tr>
+          <tr>
+            <td><strong>grav-gpu 2× A6000</strong>（3D Hilbert Lazy）</td>
+            <td class="num">33.11 s / 28.66 s</td>
+            <td class="num">448.1 W · 4.17 Wh</td>
+            <td class="num"><span class="pill best">5.27 Wh (省 25.8×)</span></td>
+            <td class="num"><span class="pill ok">0.0387%</span> · 92/92, 17/17</td>
+          </tr>
+          <tr>
+            <td><strong>grav-gpu 4× A6000</strong>（3D Hilbert Eager）</td>
+            <td class="num">30.21 s / 21.07 s</td>
+            <td class="num">635.2 W · 5.38 Wh</td>
+            <td class="num">6.39 Wh (省 21.3×)</td>
+            <td class="num"><span class="pill best">0.00106%</span> · 92/92, 17/17</td>
+          </tr>
+          <tr class="highlight">
+            <td><strong>grav-gpu 4× A6000</strong>（3D Hilbert Lazy）</td>
+            <td class="num"><strong>28.26 s / 18.99 s</strong></td>
+            <td class="num">662.7 W · 5.25 Wh</td>
+            <td class="num"><strong>6.19 Wh</strong> (省 22.0–25.6×)</td>
+            <td class="num"><span class="pill ok">0.0387%</span> · 92/92, 17/17</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="margin-top:8px;font-size:0.84rem;color:var(--muted);">
+        注：同台 <code>a9</code> 节点（2× EPYC 9754 + RTX A6000）、相同精度参数（<code>θ=0.70</code>、<code>η_G=0.025</code> / PKDGRAV3 <code>dEta=0.2236</code>）。GPU 能耗由 200 ms NVML 硬件轮询积分；节点未开放非特权 RAPL 读数，CPU 与主机开销分别按利用率缩放与 700 W 双路参考透明建模。PKDGRAV3 在 256³ 下受主机端 67 次域分解（279–426 s）与 245 次建树（146–522 s）主导，平均 GPU 利用率仅 3–6%。
+      </p>
+    </section>
+
     <!-- Quick Start -->
     <section>
       <div class="sec-head">
@@ -554,7 +635,7 @@
       </div>
       <pre>make standalone test-domain3d &amp;&amp; make test-fof
 make engine smoke KERNEL_BUILD_DIR=/path/to/swiftsim
-python3 scripts/make_opt_comparison_figures.py</pre>
+python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_code_energy_figure.py</pre>
     </section>
 
     <footer>
@@ -579,6 +660,25 @@ python3 scripts/make_opt_comparison_figures.py</pre>
           ["P_δ(k) 最大偏差 (Eager / Lazy)", "0.00106% / 0.03866%"],
           ["P_θ(k) 对齐最大偏差", "0.01978% / 0.05779%"],
           ["位置中位误差", "3.81 pc/h (min r > 0.99999993)"]
+        ]
+      },
+      bcodes: {
+        bars: [
+          { name: "CPU SWIFT (256T 建模 601 W / 700 W)", stat: "136.2 Wh · 816 s (1.0×)", pct: 100, color: "var(--cpu)" },
+          { name: "GADGET-4 (128C MPI · 451 W)", stat: "110.7 Wh · 883 s (1.2× 省)", pct: 81.3, color: "#475569" },
+          { name: "PKDGRAV3 (1× A6000 · NVML 38.6 Wh)", stat: "106.7 Wh · 2043 s (1.3× 省)", pct: 78.3, color: "#94a3b8" },
+          { name: "PKDGRAV3 (2× A6000 MPI · NVML 50.5 Wh)", stat: "94.9 Wh · 1333 s (1.4× 省)", pct: 69.7, color: "#64748b" },
+          { name: "grav-gpu 1× A6000 (NVML 3.93 Wh)", stat: "5.86 Wh · 58.1 s (省 23.2×)", pct: 4.3, color: "var(--cobalt)" },
+          { name: "grav-gpu 2× A6000 (NVML 4.17 Wh)", stat: "5.27 Wh · 33.1 s (省 25.8×)", pct: 3.9, color: "var(--emerald)" },
+          { name: "grav-gpu 4× A6000 (NVML 5.25 Wh)", stat: "6.19 Wh · 28.3 s (省 22.0×)", pct: 4.5, color: "var(--signal)" }
+        ],
+        metrics: [
+          ["对比基准", "a9 同节点 256³ · a=0.855→0.92 · θ=0.70"],
+          ["GPU 纯算能效 (vs SWIFT)", "34.7× (1G: 3.93 Wh vs 136.2 Wh)"],
+          ["整机能耗最低 (2× A6000)", "5.27 Wh (-96.1%, 25.8× 节能)"],
+          ["最快壁钟耗时 (4× A6000 Lazy)", "18.99 s 演化 / 28.26 s 总耗时 (28.9×)"],
+          ["PKDGRAV3 256³ 瓶颈剖析", "GPU 占比 3–6%，CPU DD+建树占 ~40–46%"],
+          ["1024³ 全历史实测功率", "657–736 W · 28.3–29.5 vs 213.1 kWh (-86%)"]
         ]
       },
       b1024: {
@@ -643,6 +743,12 @@ python3 scripts/make_opt_comparison_figures.py</pre>
         pdf: "paper/figures/fig6_accuracy_vs_cpu.pdf",
         alt: "CPU 与 GPU 精度对比图",
         desc: "256³ / 1024³ 物质与动量功率谱残差（全波数远低于 0.1%），以及跨子系统精度天梯。"
+      },
+      codes: {
+        src: "paper/figures/fig7_code_energy_comparison.png",
+        pdf: "paper/figures/fig7_code_energy_comparison.pdf",
+        alt: "跨代码时间、实测 NVML 能耗与精度对比图",
+        desc: "SWIFT、GADGET-4、PKDGRAV3（1G/2G MPI）与 grav-gpu（1G/2G/4G）在 256³ 相同物理参数下的总耗时、NVML 实测 GPU 能耗 + 整机建模能耗与功率谱偏差对比。"
       }
     };
 
