@@ -1827,6 +1827,78 @@ __global__ void integrate_slab(float3* velocity, float* old_acc_arr, unsigned ch
   }
 }
 
+__global__ void reduce_energy_mom_kernel(
+    const double3* __restrict__ pos,
+    const float3* __restrict__ vel,
+    const float4* __restrict__ raw,
+    const float3* __restrict__ mesh_acc,
+    const float* __restrict__ pm_pot,
+    const unsigned char* __restrict__ bins,
+    const float* __restrict__ mass_arr,
+    float uniform_mass,
+    int n,
+    Tick ti,
+    const double* __restrict__ finish,
+    double closing_pm_kick,
+    double grav_G,
+    double pot_norm,
+    double inv_a,
+    double* __restrict__ out_accum) {
+  double v[10] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
+    const double m = mass_arr ? double(mass_arr[i]) : double(uniform_mass);
+    const float4 rf = raw[i];
+    const float3 am = mesh_acc ? mesh_acc[i] : float3{0.f, 0.f, 0.f};
+    const double pp = pm_pot ? double(pm_pot[i]) : 0.0;
+    double vx = double(vel[i].x);
+    double vy = double(vel[i].y);
+    double vz = double(vel[i].z);
+    if (ti) {
+      const unsigned char old = bins[i];
+      const double kf = finish[old];
+      vx += grav_G * double(rf.x) * kf;
+      vy += grav_G * double(rf.y) * kf;
+      vz += grav_G * double(rf.z) * kf;
+    }
+    if (closing_pm_kick != 0.0) {
+      vx += double(am.x) * closing_pm_kick;
+      vy += double(am.y) * closing_pm_kick;
+      vz += double(am.z) * closing_pm_kick;
+    }
+    vx *= inv_a;
+    vy *= inv_a;
+    vz *= inv_a;
+    const double v2 = vx * vx + vy * vy + vz * vz;
+    const double phi = (double(rf.w) + pot_norm) * grav_G + pp;
+    const double3 x = pos[i];
+    v[0] += 0.5 * m * v2;
+    v[1] += 0.5 * m * phi;
+    v[2] += m * vx;
+    v[3] += m * vy;
+    v[4] += m * vz;
+    v[5] += m * (x.y * vz - x.z * vy);
+    v[6] += m * (x.z * vx - x.x * vz);
+    v[7] += m * (x.x * vy - x.y * vx);
+    v[8] += m;
+    v[9] += v2;
+  }
+  __shared__ double smem[8][10];
+  const int lane = threadIdx.x & 31;
+  const int wid = threadIdx.x >> 5;
+  for (int k = 0; k < 10; ++k) {
+    double val = v[k];
+    for (int off = 16; off > 0; off >>= 1) val += __shfl_down_sync(0xffffffff, val, off);
+    if (lane == 0) smem[wid][k] = val;
+  }
+  __syncthreads();
+  if (threadIdx.x < 10) {
+    double sum = 0.0;
+    const int nwarps = blockDim.x >> 5;
+    for (int w = 0; w < nwarps; ++w) sum += smem[w][threadIdx.x];
+    atomicAdd(&out_accum[threadIdx.x], sum);
+  }
+}
+
 struct DevMigrant {
   double3 x;
   float3 v, mesh_acc;
@@ -3533,6 +3605,8 @@ int main(int argc, char** argv) {
     const char* grav_eta_env = std::getenv("SWIFT_GRAV_ETA");
     const char* ext_pot_env = std::getenv("SWIFT_EXT_POT_PLUMMER");
     const char* fc_n_env = std::getenv("SWIFT_FORCE_CHECK_N");
+    const char* energy_log_env = std::getenv("SWIFT_ENERGY_LOG");
+    const bool energy_log = energy_log_env && std::string(energy_log_env) != "0";
     const char* lc_out_env = std::getenv("SWIFT_LIGHTCONE_OUT");
     const char* lc_obs_env = std::getenv("SWIFT_LIGHTCONE_OBS");
     const char* lc_aobs_env = std::getenv("SWIFT_LIGHTCONE_AOBS");
@@ -3740,8 +3814,8 @@ int main(int argc, char** argv) {
     if (split_batch_warps < 256 || split_batch_warps > (1 << 20)) {
       throw std::runtime_error("SWIFT_SPLIT_BATCH_WARPS must be between 256 and 1048576");
     }
-    if (force0_out_path && num_gpus > 1) {
-      throw std::runtime_error("SWIFT_FORCE0_OUT requires SWIFT_NUM_GPUS=1");
+    if (force0_out_path && num_gpus > 1 && domain_mode == swift3d::DomainMode::Slab1D) {
+      throw std::runtime_error("SWIFT_FORCE0_OUT on 1d_slab requires SWIFT_NUM_GPUS=1");
     }
     const int lazy_max_steps = lazy_max_env ? std::stoi(lazy_max_env) : 16;
     const double lazy_disp_frac = lazy_disp_env ? std::stod(lazy_disp_env) : 0.15;
@@ -3949,6 +4023,7 @@ int main(int argc, char** argv) {
       d3cfg.lazy_disp_frac = lazy_disp_frac;
       d3cfg.lazy_active_frac = lazy_active_frac;
       d3cfg.skip_output_write = skip_output_write;
+      d3cfg.energy_log = energy_log;
       d3cfg.force0_out_path = force0_out_path;
       d3cfg.force_comp_path = force_comp_path;
       d3cfg.force3_out_path = force3_out_path;
@@ -4525,6 +4600,15 @@ int main(int argc, char** argv) {
     size_t sanity_bad = 0;
     double sanity_v2_sum = 0.0, sanity_pot_sum = 0.0;
     float sanity_pot_min = FLT_MAX, sanity_pot_max = -FLT_MAX;
+    std::vector<double*> d_energy_accum(num_gpus, nullptr);
+    std::vector<std::array<double, 10>> gpu_energy(num_gpus);
+    if (energy_log) {
+      for (int g = 0; g < num_gpus; ++g) {
+        check(cudaSetDevice(g));
+        check(cudaMalloc(&d_energy_accum[g], 10 * sizeof(double)));
+      }
+      check(cudaSetDevice(0));
+    }
 
     Tick previous = 0, ti = 0;
     Tick next_pm_boundary = 0;
@@ -5662,6 +5746,33 @@ int main(int argc, char** argv) {
             check(cudaGetLastError());
           }
 
+          const bool is_energy_step = energy_log && (is_pm_step || is_final || (!periodic && (ti % p.short_span_cap == 0)));
+          if (is_energy_step && ns > 0) {
+            if (periodic) {
+              if (pm_dist_enabled) {
+                dist_pm.interpolate(g, S.d_x.p, size_t(ns), h.box, p.G,
+                                    S.d_mesh_acc.p, G.d_pm_pot);
+              } else {
+                swift_pm_cuda_interpolate_buf(
+                    S.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
+                    S.d_mesh_acc.p, G.d_pm_pot, G.compute_stream);
+              }
+            }
+            const double closing_pm_e =
+                (!periodic || ti == 0) ? 0.0
+                : (is_pm_step ? (is_final ? pm_kick : p.factors(ti - prev_pm_span / 2, ti, false))
+                              : p.factors(ti - current_pm_span / 2, ti, false));
+            const int eblocks = std::min(256, (ns + 255) / 256);
+            reduce_energy_mom_kernel<<<eblocks, 256, 0, G.compute_stream>>>(
+                S.d_x.p, S.d_v.p, G.d_force, S.d_mesh_acc.p,
+                periodic ? G.d_pm_pot : nullptr, S.d_bins.p,
+                mass_uniform ? nullptr : S.d_mass.p, first_mass,
+                ns, ti, G.d_kick_finish.p, closing_pm_e,
+                double(p.G), potential_norm, comoving ? (1.0 / a) : 1.0,
+                d_energy_accum[g]);
+            check(cudaGetLastError());
+          }
+
           const double tk0 = wall();
           init_meta<<<1, 1, 0, G.compute_stream>>>(G.d_stats.p, G.d_tree_invalid.p, G.trees[ls].nodes);
           float3* synced_v = nullptr;
@@ -5803,6 +5914,11 @@ int main(int argc, char** argv) {
           }
         };
 
+        const bool is_energy_step_gpu = energy_log && (is_pm_step || is_final || (!periodic && (ti % p.short_span_cap == 0)));
+        if (is_energy_step_gpu) {
+          check(cudaMemsetAsync(d_energy_accum[g], 0, 10 * sizeof(double), G.compute_stream));
+        }
+
         if (num_gpus == 1) {
           for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
             slab_ghost_ms[owned_slab(0, ls)] = 0.0;
@@ -5924,6 +6040,11 @@ int main(int argc, char** argv) {
             }
           }
         }
+        if (is_energy_step_gpu) {
+          check(cudaMemcpyAsync(gpu_energy[g].data(), d_energy_accum[g], 10 * sizeof(double),
+                                cudaMemcpyDeviceToHost, G.compute_stream));
+          check(cudaStreamSynchronize(G.compute_stream));
+        }
 #pragma omp barrier
         }  // end omp parallel
 
@@ -6001,6 +6122,22 @@ int main(int argc, char** argv) {
                     << ",\"m2l_chunks\":" << step_m2l_chunks
                     << ",\"p2p_warps\":" << step_p2p_warps
                     << ",\"m2l_warps\":" << step_m2l_warps << "}" << std::endl;
+        }
+
+        const bool is_energy_step_out = energy_log && (is_pm_step || is_final || (!periodic && (ti % p.short_span_cap == 0)));
+        if (is_energy_step_out) {
+          double tot[10] = {0};
+          for (int g = 0; g < num_gpus; ++g)
+            for (int k = 0; k < 10; ++k) tot[k] += gpu_energy[g][k];
+          const double inv_a_e = comoving ? (1.0 / a) : 1.0;
+          const double U_phys = tot[1] * inv_a_e;
+          std::cout << std::setprecision(12)
+                    << "ENERGY {\"step\":" << global_iteration << ",\"a\":" << a
+                    << ",\"T\":" << tot[0] << ",\"U\":" << U_phys
+                    << ",\"W_com\":" << tot[1] << ",\"E\":" << (tot[0] + U_phys)
+                    << ",\"Px\":" << tot[2] << ",\"Py\":" << tot[3] << ",\"Pz\":" << tot[4]
+                    << ",\"Lx\":" << tot[5] << ",\"Ly\":" << tot[6] << ",\"Lz\":" << tot[7]
+                    << ",\"M\":" << tot[8] << ",\"v_rms\":" << sqrt(tot[9] / double(N)) << "}" << std::endl;
         }
 
         if (is_pm_step) {
@@ -6300,6 +6437,13 @@ int main(int argc, char** argv) {
               << ",\"export_s\":" << export_s << "}" << std::endl;
 
     if (pm_dist_enabled) dist_pm.destroy();
+    for (int g = 0; g < num_gpus; ++g) {
+      if (d_energy_accum[g]) {
+        check(cudaSetDevice(g));
+        cudaFree(d_energy_accum[g]);
+      }
+    }
+    check(cudaSetDevice(0));
     for (auto& G : gpus) G.cleanup();
 
     if (fc_target_cap > 0 || lc_enabled) {

@@ -115,6 +115,7 @@ Note: `prepare_swift_input.py` works for any $N$ (`64^3`–`1024^3`); [scripts/p
 | `SWIFT_REBALANCE_INTERVAL` | `8` | Rebalance cadence in steps for 3D domains (`0` disables live rebalancing) |
 | `SWIFT_REBALANCE_MIN_GAIN` | `0.02` | Minimum predicted imbalance improvement to commit rebalance |
 | `SWIFT_RUN_FOF` | `0` | Set `1` to compute inline FoF (`*.fof.bin`) at snapshot/final outputs via `whole_fof_multigpu_swift` |
+| `SWIFT_ENERGY_LOG` | `0` | Set `1` to log per-PM-step kinetic/potential energy ($T, U, E$), momentum ($\mathbf{P}, \mathbf{L}$), and Layzer–Irvine checks |
 | `SWIFT_FOF_LINK_RATIO` / `_MIN_SIZE` | `0.2` / `32` | Linking length ratio $b$ (in mean interparticle spacing) and minimum halo size |
 | `SWIFT_GRAV_G` | `43.0092` | Gravitational constant in internal units (`Mpc`, `10^10 Msun`, `km/s`) |
 | `SWIFT_COSMO_H0` / `OMEGA_M` / `OMEGA_DE` | `67.36` / `0.3153` / `0.6847` | Cosmological parameters |
@@ -155,6 +156,7 @@ swift-treepm-gpu/
 │   ├── prepare_swift_input.py      # General SWIFT HDF5 -> dense binary IC/snapshot converter
 │   ├── prepare_1024_input.py       # Legacy 1024^3 converter for archival scripts
 │   ├── make_smoke_ic.py            # Synthetic clustered periodic DM IC generator (numpy-only)
+│   ├── make_plummer_ic.py          # Equilibrium isolated Plummer sphere IC generator (energy/virial gate)
 │   ├── smoke_fof.py                # Standalone ctypes FoF + Catalog + SO parity smoke test
 │   ├── verify_smoke_e2e.py         # End-to-end smoke output & SO verifier
 │   ├── test_domain3d_smoke.cpp     # Standalone C++17 3D domain decomposition unit test
@@ -179,6 +181,7 @@ swift-treepm-gpu/
 - [x] Pure-CUDA distributed multi-GPU FFT PM solver (`SWIFT_PM_DIST=1`)
 - [x] 3D `12×12×12` Hilbert/ORB domain decomposition, dynamic rebalancing, and compute/communication overlap
 - [x] Full-GPU FoF, cross-slab GPU merge, multi-GPU 3D inline FoF, Catalog, and SO (`M200c/R200c`, `M200m/R200m`)
+- [x] Pre-MPI gravity physics gate ([reports/pre-mpi-physics-gate.json](reports/pre-mpi-physics-gate.json)): Layzer–Irvine energy (`3.07e-4`) & momentum (`3.72e-5`) across $z=200\to0$ ($526.6\text{ s}$, $9{,}257$ steps, $0.123\%$ $P_\delta(k)$, $18/18$ massive halos), 32K Plummer virial/energy (`1.15e-5`), and 4-GPU boundary force parity (`1.03e-4` median)
 
 ### Planned Extensions
 - [ ] **Multi-Node MPI + GPU-Direct RDMA**: Extend 3D domain decomposition and distributed FFT PM across nodes to scale from $1024^3$ to $2048^3$–$4096^3$.

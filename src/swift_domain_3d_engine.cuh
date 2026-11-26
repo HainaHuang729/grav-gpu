@@ -1484,6 +1484,7 @@ struct Domain3DRunConfig {
   double lazy_disp_frac = 0.15;
   double lazy_active_frac = 0.50;
   bool skip_output_write = false;
+  bool energy_log = false;
 
   const char* force0_out_path = nullptr;
   const char* force_comp_path = nullptr;
@@ -2150,6 +2151,15 @@ inline int run_domain_3d_evolution(
   size_t sanity_bad = 0;
   double sanity_v2_sum = 0.0, sanity_pot_sum = 0.0;
   float sanity_pot_min = FLT_MAX, sanity_pot_max = -FLT_MAX;
+  std::vector<double*> d_energy_accum(num_gpus, nullptr);
+  std::vector<std::array<double, 10>> gpu_energy(num_gpus);
+  if (cfg.energy_log) {
+    for (int g = 0; g < num_gpus; ++g) {
+      check(cudaSetDevice(g));
+      check(cudaMalloc(&d_energy_accum[g], 10 * sizeof(double)));
+    }
+    check(cudaSetDevice(0));
+  }
   const double evo_start = wall();
 
   for (size_t seg = 0; seg + 1 < knots.size(); ++seg) {
@@ -3229,12 +3239,40 @@ inline int run_domain_3d_evolution(
             }
             gpu_force_ms[g] = f_ms;
 
-            if (cfg.force0_out_path && global_iteration == 0 && num_gpus == 1) {
+            if (cfg.force0_out_path && global_iteration == 0) {
               std::vector<float4> hf(ns);
               std::vector<uint32_t> hidx(ns);
               check(cudaMemcpy(hf.data(), G.d_force.p, size_t(ns) * sizeof(float4), cudaMemcpyDeviceToHost));
               check(cudaMemcpy(hidx.data(), G.d_orig_idx.p, size_t(ns) * sizeof(uint32_t), cudaMemcpyDeviceToHost));
               for (int k = 0; k < ns; ++k) out_force0_f4[hidx[k]] = hf[k];
+            }
+
+            if (cfg.energy_log && (is_pm_step || is_final)) {
+              check(cudaMemsetAsync(d_energy_accum[g], 0, 10 * sizeof(double), G.compute_stream));
+              if (ns > 0) {
+                if (cfg.pm_dist_enabled) {
+                  dist_pm.interpolate(g, G.d_x.p, size_t(ns), h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p);
+                } else {
+                  swift_pm_cuda_interpolate_buf(
+                      G.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
+                      G.d_mesh_acc.p, G.d_pm_pot.p, G.compute_stream);
+                }
+                const double closing_pm_e =
+                    (ti == 0) ? 0.0
+                    : (is_pm_step ? (is_final ? pm_kick : p.factors(ti - prev_pm_span / 2, ti, false))
+                                  : p.factors(ti - current_pm_span / 2, ti, false));
+                const int eblocks = std::min(256, (ns + 255) / 256);
+                reduce_energy_mom_kernel<<<eblocks, 256, 0, G.compute_stream>>>(
+                    G.d_x.p, G.d_v.p, G.d_force.p, G.d_mesh_acc.p,
+                    G.d_pm_pot.p, G.d_bins.p,
+                    mass_uniform ? nullptr : G.d_mass.p, first_mass,
+                    ns, ti, G.d_kick_finish.p, closing_pm_e,
+                    double(p.G), potential_norm, cfg.comoving ? (1.0 / a) : 1.0,
+                    d_energy_accum[g]);
+                check(cudaGetLastError());
+              }
+              check(cudaMemcpyAsync(gpu_energy[g].data(), d_energy_accum[g], 10 * sizeof(double),
+                                    cudaMemcpyDeviceToHost, G.compute_stream));
             }
 
             if (do_fc_now && g == 0 && n_fc_tgt > 0) {
@@ -3437,6 +3475,21 @@ inline int run_domain_3d_evolution(
                 << ",\"pm\":" << (is_pm_step ? "true" : "false")
                 << ",\"lazy\":" << (do_lazy_step ? "true" : "false")
                 << ",\"pm_device_ms\":" << pm_ms << "}" << std::endl;
+
+      if (cfg.energy_log && (is_pm_step || is_final)) {
+        double tot[10] = {0};
+        for (int g = 0; g < num_gpus; ++g)
+          for (int k = 0; k < 10; ++k) tot[k] += gpu_energy[g][k];
+        const double inv_a_e = cfg.comoving ? (1.0 / a) : 1.0;
+        const double U_phys = tot[1] * inv_a_e;
+        std::cout << std::setprecision(12)
+                  << "ENERGY {\"step\":" << global_iteration << ",\"a\":" << a
+                  << ",\"T\":" << tot[0] << ",\"U\":" << U_phys
+                  << ",\"W_com\":" << tot[1] << ",\"E\":" << (tot[0] + U_phys)
+                  << ",\"Px\":" << tot[2] << ",\"Py\":" << tot[3] << ",\"Pz\":" << tot[4]
+                  << ",\"Lx\":" << tot[5] << ",\"Ly\":" << tot[6] << ",\"Lz\":" << tot[7]
+                  << ",\"M\":" << tot[8] << ",\"v_rms\":" << sqrt(tot[9] / double(N)) << "}" << std::endl;
+      }
 
       if (do_fc_now && n_fc_tgt > 0) {
         check(cudaSetDevice(0));
@@ -3661,6 +3714,13 @@ inline int run_domain_3d_evolution(
     }
   }
   if (cfg.pm_dist_enabled) dist_pm.destroy();
+  for (int g = 0; g < num_gpus; ++g) {
+    if (d_energy_accum[g]) {
+      check(cudaSetDevice(g));
+      cudaFree(d_energy_accum[g]);
+    }
+  }
+  check(cudaSetDevice(0));
   for (auto& G : gpus) G.cleanup();
   if (fc_target_cap > 0 || cfg.lc_enabled) {
     check(cudaSetDevice(0));
