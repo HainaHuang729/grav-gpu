@@ -539,6 +539,20 @@
             <td class="num">维里比 2T/|U| = 0.996–0.999</td>
           </tr>
           <tr>
+            <td><strong>64³ Zel'dovich 平面波塌缩</strong>（EdS, a=0.02→0.50）</td>
+            <td class="num">6.71 s · 513 步</td>
+            <td class="num"><span class="pill ok">Δx/L = 4.41 × 10⁻⁴</span></td>
+            <td class="num">Δv/v_pk = 0.592%</td>
+            <td class="num">切向伪速度 0.070 km/s</td>
+          </tr>
+          <tr>
+            <td><strong>周期性 Ewald 精确力 θ 扫描</strong>（64³, 4096 粒子）</td>
+            <td class="num">θ = 0.9 → 0.3</td>
+            <td class="num"><span class="pill ok">短程 8.48e-3 → 1.14e-4</span></td>
+            <td class="num">总力 1.98e-3 @θ=0.7</td>
+            <td class="num">总力 1.03e-3 @θ=0.3 (PM 底)</td>
+          </tr>
+          <tr>
             <td><strong>4-GPU 3D vs 1-GPU 1D 第 0 步力场</strong></td>
             <td class="num">16.78M 粒子</td>
             <td class="num">势能中位 8.88 × 10⁻⁶</td>
@@ -674,10 +688,10 @@ python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_c
         ],
         metrics: [
           ["对比基准", "a9 同节点 256³ · a=0.855→0.92 · θ=0.70"],
-          ["GPU 纯算能效 (vs SWIFT)", "34.7× (1G: 3.93 Wh vs 136.2 Wh)"],
+          ["活跃粒子更新吞吐 (4G / 1G)", "49.62 M/s (12.41/GPU) · 18.84 M/s"],
+          ["单位更新能耗 (J / M-step)", "GPU 15.01–20.05 J · 整机 20.15–23.64 J"],
+          ["对比基准能耗 (SWIFT / PKD)", "SWIFT 519.9 J · PKD 285.9–374.0 J (GPU)"],
           ["整机能耗最低 (2× A6000)", "5.27 Wh (-96.1%, 25.8× 节能)"],
-          ["最快壁钟耗时 (4× A6000 Lazy)", "18.99 s 演化 / 28.26 s 总耗时 (28.9×)"],
-          ["PKDGRAV3 256³ 瓶颈剖析", "GPU 占比 3–6%，CPU DD+建树占 ~40–46%"],
           ["1024³ 全历史实测功率", "657–736 W · 28.3–29.5 vs 213.1 kWh (-86%)"]
         ]
       },

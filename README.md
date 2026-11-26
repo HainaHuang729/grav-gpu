@@ -46,16 +46,16 @@
 
 All codes below were benchmarked on the same `phy-gpus` node `a9` (`2× AMD EPYC 9754` 256 cores, `5× NVIDIA RTX A6000`) from the exact same `16,777,216`-particle `L = 25 Mpc/h` snapshot with matched opening angle ($\theta = 0.70$), comoving softening ($\epsilon = 0.001953125\ \text{Mpc}/h$), and timestep factor ($\eta_G = 0.025$ / PKDGRAV3 `dEta = 0.2236068`). GPU power is directly measured via `200 ms` `nvidia-smi` NVML polling; because `a9` lacks unprivileged RAPL `powercap`, host/CPU energy is reported transparently as modeled whole-node power (`+120 W` base host for GPU runs; utilization-scaled `120–800 W` and flat `700 W` reference for dual-socket EPYC CPU runs). Full telemetry is saved in [reports/code-energy-comparison.json](reports/code-energy-comparison.json).
 
-| Code & Configuration | Wall / Evo Time | Evo Speedup vs. SWIFT | Measured GPU Energy (Wh) | Whole-Node Energy (Wh) | Max $P_\delta(k)$ Dev & FoF HMF |
-| --- | --- | --- | --- | --- | --- |
-| **PKDGRAV3 3.5.1** (`1× A6000`, `-np 1 -sz 16`) | `2043.2 s` / `1926.3 s` | `0.41×` | `38.57 Wh` (`67.9 W`) | `106.68 Wh` | `0.150%` (`10k`: `91/92`, `100k`: `17/17`) |
-| **PKDGRAV3 3.5.1** (`2× A6000 MPI`, `-np 2 -sz 16`) | `1333.2 s` / `1223.6 s` | `0.65×` | `50.45 Wh` (`136.2 W`) | `94.89 Wh` | `0.150%` (`10k`: `91/92`, `100k`: `17/17`) |
-| **GADGET-4** (`128` EPYC cores MPI TreePM) | `883.2 s` / `857.7 s` | `0.93×` | — | `110.70 Wh` (`700W`: `171.7 Wh`) | `0.187%` (`10k`: `92/92`, `100k`: `17/17`) |
-| **CPU SWIFT** (`256T` EPYC FMM+PM baseline) | `816.0 s` / `796.4 s` | `1.00×` | — | `136.16 Wh` (`700W`: `158.7 Wh`) | Reference (`92`, `17`) |
-| **`grav-gpu` `1× A6000`** (3D Hilbert Lazy) | `58.09 s` / `50.03 s` | **`15.9×`** | **`3.93 Wh`** (`241.3 W`) | **`5.86 Wh`** (`23.2×` savings) | `0.0387%` (`10k`: `92/92`, `100k`: `17/17`) |
-| **`grav-gpu` `2× A6000`** (3D Hilbert Lazy) | `33.11 s` / `28.66 s` | **`27.8×`** | **`4.17 Wh`** (`448.1 W`) | **`5.27 Wh`** (**`25.8×`** lowest) | `0.0387%` (`10k`: `92/92`, `100k`: `17/17`) |
-| **`grav-gpu` `4× A6000`** (3D Hilbert Eager) | `30.21 s` / `21.07 s` | **`37.8×`** | `5.38 Wh` (`635.2 W`) | `6.39 Wh` (`21.3×` savings) | **`0.00106%`** (`92/92`, `17/17`) |
-| **`grav-gpu` `4× A6000`** (3D Hilbert Lazy) | **`28.26 s` / `18.99 s`** | **`41.9×`** (`28.9×` wall) | `5.25 Wh` (`662.7 W`) | `6.19 Wh` (`22.0×` / `25.6×` @700W) | `0.0387%` (`92/92`, `100k`: `17/17`) |
+| Code & Configuration | Wall / Evo Time | Throughput (`M/s`) | Measured GPU (Wh) | Whole-Node (Wh) | `J / M-step` (GPU / Node) | Max $P_\delta(k)$ & HMF |
+| --- | --- | --- | --- | --- | --- | --- |
+| **PKDGRAV3 3.5.1** (`1× A6000`, `-np 1 -sz 16`) | `2043.2 s` / `1926.3 s` | `0.252` (`0.252/GPU`) | `38.57` (`67.9 W`) | `106.68` | `285.9` / `790.8` | `0.150%` (`91/92`, `17/17`) |
+| **PKDGRAV3 3.5.1** (`2× A6000 MPI`, `-np 2 -sz 16`) | `1333.2 s` / `1223.6 s` | `0.397` (`0.198/GPU`) | `50.45` (`136.2 W`) | `94.89` | `374.0` / `703.4` | `0.150%` (`91/92`, `17/17`) |
+| **GADGET-4** (`128` EPYC cores MPI TreePM) | `883.2 s` / `857.7 s` | `1.206` | — | `110.70` (`700W`: `171.7`) | — / `385.3` (`597.8`) | `0.187%` (`92/92`, `17/17`) |
+| **CPU SWIFT** (`256T` EPYC FMM+PM baseline) | `816.0 s` / `796.4 s` | `1.184` | — | `136.16` (`700W`: `158.7`) | — / `519.9` (`605.9`) | Reference (`92`, `17`) |
+| **`grav-gpu` `1× A6000`** (3D Hilbert Lazy) | `58.09 s` / `50.03 s` | `18.84` (`18.84/GPU`) | **`3.93`** (`241.3 W`) | `5.86` (`23.2×`) | **`15.01`** / `22.40` | `0.0387%` (`92/92`, `17/17`) |
+| **`grav-gpu` `2× A6000`** (3D Hilbert Lazy) | `33.11 s` / `28.66 s` | `32.88` (`16.44/GPU`) | `4.17` (`448.1 W`) | **`5.27`** (**`25.8×`**) | `15.93` / **`20.15`** | `0.0387%` (`92/92`, `17/17`) |
+| **`grav-gpu` `4× A6000`** (3D Hilbert Eager) | `30.21 s` / `21.07 s` | `44.74` (`11.19/GPU`) | `5.38` (`635.2 W`) | `6.39` (`21.3×`) | `20.54` / `24.39` | **`0.00106%`** (`92/92`, `17/17`) |
+| **`grav-gpu` `4× A6000`** (3D Hilbert Lazy) | **`28.26 s` / `18.99 s`** | **`49.62`** (`12.41/GPU`) | `5.25` (`662.7 W`) | `6.19` (`22.0–25.6×`) | `20.05` / `23.64` | `0.0387%` (`92/92`, `17/17`) |
 
 > **Why PKDGRAV3 spends more wall time than `grav-gpu` at $256^3$**: PKDGRAV3 offloads FMM+Ewald gravity tiles to GPUs while rebuilding domain decompositions (`67×`, `425.95 s` on `1G` / `278.91 s` on `2G-MPI`) and CPU trees (`245×`, `522.19 s` / `145.87 s`) on host threads across `244` adaptive substeps (`3.3–5.6%` mean GPU utilization). Keeping all `16.78M` particles GPU-resident with TreePM + lazy Hilbert octree refits (`42.7–73.6%` GPU utilization) yields **`29×` faster wall time** and **`18–26×` lower whole-node energy**. On $1024^3$ full-history ($z=200\to0$), live `4× A6000` power measures `657.1–735.9 W`, reducing full-run node energy from `213.1 kWh` to `28.3–29.5 kWh` (`-86%`).
 
@@ -179,6 +179,7 @@ grav-gpu/
 │   ├── prepare_1024_input.py       # Legacy 1024^3 converter for archival scripts
 │   ├── make_smoke_ic.py            # Synthetic clustered periodic DM IC generator (numpy-only)
 │   ├── make_plummer_ic.py          # Equilibrium isolated Plummer sphere IC generator (energy/virial gate)
+│   ├── zeldovich_benchmark.py      # 1D EdS Zel'dovich plane-wave generator & analytical verifier
 │   ├── smoke_fof.py                # Standalone ctypes FoF + Catalog + SO parity smoke test
 │   ├── verify_smoke_e2e.py         # End-to-end smoke output & SO verifier
 │   ├── test_domain3d_smoke.cpp     # Standalone C++17 3D domain decomposition unit test
@@ -204,7 +205,7 @@ grav-gpu/
 - [x] Pure-CUDA distributed multi-GPU FFT PM solver (`GRAV_PM_DIST=1`)
 - [x] 3D `12×12×12` Hilbert/ORB domain decomposition, dynamic rebalancing, and compute/communication overlap
 - [x] Full-GPU FoF, cross-slab GPU merge, multi-GPU 3D inline FoF, Catalog, and SO (`M200c/R200c`, `M200m/R200m`)
-- [x] Pre-MPI gravity physics gate ([reports/pre-mpi-physics-gate.json](reports/pre-mpi-physics-gate.json)): Layzer–Irvine energy (`3.07e-4`) & momentum (`3.72e-5`) across $z=200\to0$ ($526.6\text{ s}$, $9{,}257$ steps, $0.123\%$ $P_\delta(k)$, $18/18$ massive halos), 32K Plummer virial/energy (`1.15e-5`), and 4-GPU boundary force parity (`1.03e-4` median)
+- [x] Pre-MPI & analytical physics gates ([reports/pre-mpi-physics-gate.json](reports/pre-mpi-physics-gate.json), [reports/analytical-physics-gates.json](reports/analytical-physics-gates.json)): 1D EdS Zel'dovich collapse ($64^3$, $a=0.02\to0.50$: $\Delta x_{\rm RMS}/L = 4.41\times 10^{-4}$, $\Delta v_{\rm RMS}/v_{\rm pk} = 0.592\%$), exact periodic Ewald $\theta$-convergence (short median $8.48\times 10^{-3} \to 1.14\times 10^{-4}$ across $\theta \in [0.9, 0.3]$; total median $1.98\times 10^{-3}$ at $\theta=0.7$), Layzer–Irvine energy (`3.07e-4`) & momentum (`3.72e-5`) across $z=200\to0$ ($526.6\text{ s}$, $9{,}257$ steps, $0.123\%$ $P_\delta(k)$, $18/18$ massive halos), 32K Plummer virial/energy (`1.15e-5`), and 4-GPU boundary force parity (`1.03e-4` median)
 
 ### Planned Extensions
 - [ ] **Multi-Node MPI + GPU-Direct RDMA**: Extend 3D domain decomposition and distributed FFT PM across nodes to scale from $1024^3$ to $2048^3$–$4096^3$.

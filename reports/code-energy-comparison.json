@@ -59,9 +59,21 @@
         "p_delta_min_r": 1.0,
         "p_momentum_max_abs_dev": 0.0,
         "v_rms_km_s": 295.814,
-        "hmf_10k_cpu_test": [92, 92],
-        "hmf_100k_cpu_test": [17, 17]
-      }
+        "hmf_10k_cpu_test": [
+          92,
+          92
+        ],
+        "hmf_100k_cpu_test": [
+          17,
+          17
+        ]
+      },
+      "total_active_updates": 942755321,
+      "throughput_m_particles_per_s_evo": 1.1838,
+      "throughput_m_particles_per_s_per_gpu": null,
+      "gpu_j_per_m_particle_step": null,
+      "node_j_per_m_particle_step": 519.94,
+      "node_700w_ref_j_per_m_particle_step": 605.86
     },
     {
       "id": "gadget4_128c",
@@ -102,9 +114,21 @@
         "dr_median_mpc_h": 6.708e-05,
         "dv_median_km_s": 1.8925,
         "v_rms_km_s": 295.478,
-        "hmf_10k_cpu_test": [92, 92],
-        "hmf_100k_cpu_test": [17, 17]
-      }
+        "hmf_10k_cpu_test": [
+          92,
+          92
+        ],
+        "hmf_100k_cpu_test": [
+          17,
+          17
+        ]
+      },
+      "total_active_updates": 1034293501,
+      "throughput_m_particles_per_s_evo": 1.2058,
+      "throughput_m_particles_per_s_per_gpu": null,
+      "gpu_j_per_m_particle_step": null,
+      "node_j_per_m_particle_step": 385.31,
+      "node_700w_ref_j_per_m_particle_step": 597.76
     },
     {
       "id": "pkdgrav3_1g",
@@ -142,9 +166,20 @@
         "dr_median_mpc_h": 0.0002971,
         "dv_median_km_s": 2.1187,
         "v_rms_km_s": 295.917,
-        "hmf_10k_cpu_test": [92, 91],
-        "hmf_100k_cpu_test": [17, 17]
-      }
+        "hmf_10k_cpu_test": [
+          92,
+          91
+        ],
+        "hmf_100k_cpu_test": [
+          17,
+          17
+        ]
+      },
+      "total_active_updates": 485657549,
+      "throughput_m_particles_per_s_evo": 0.2521,
+      "throughput_m_particles_per_s_per_gpu": 0.2521,
+      "gpu_j_per_m_particle_step": 285.91,
+      "node_j_per_m_particle_step": 790.76
     },
     {
       "id": "pkdgrav3_2g_mpi",
@@ -177,10 +212,21 @@
         "p_delta_rms_dev": 0.0008356,
         "p_delta_min_r": 0.99999986,
         "dr_median_mpc_h": 0.0002971,
-        "hmf_10k_cpu_test": [92, 91],
-        "hmf_100k_cpu_test": [17, 17],
+        "hmf_10k_cpu_test": [
+          92,
+          91
+        ],
+        "hmf_100k_cpu_test": [
+          17,
+          17
+        ],
         "note": "Matter P_delta and HMF verified directly; velocity unit check verified on identical pkd_1g physics (P_momentum_max=0.6933%, v_rms=295.92 km/s)."
-      }
+      },
+      "total_active_updates": 485656677,
+      "throughput_m_particles_per_s_evo": 0.3969,
+      "throughput_m_particles_per_s_per_gpu": 0.1985,
+      "gpu_j_per_m_particle_step": 373.98,
+      "node_j_per_m_particle_step": 703.39
     },
     {
       "id": "grav_gpu_1g_1d_lazy",
@@ -205,9 +251,20 @@
         "dr_median_mpc_h": 3.92e-06,
         "dv_median_km_s": 1.6823,
         "v_rms_km_s": 295.642,
-        "hmf_10k_cpu_test": [92, 92],
-        "hmf_100k_cpu_test": [17, 17]
-      }
+        "hmf_10k_cpu_test": [
+          92,
+          92
+        ],
+        "hmf_100k_cpu_test": [
+          17,
+          17
+        ]
+      },
+      "total_active_updates": 942337212,
+      "throughput_m_particles_per_s_evo": 17.0097,
+      "throughput_m_particles_per_s_per_gpu": 17.0097,
+      "gpu_j_per_m_particle_step": 16.48,
+      "node_j_per_m_particle_step": 26.15
     },
     {
       "id": "grav_gpu_1g_3d_lazy",
@@ -232,9 +289,20 @@
         "dr_median_mpc_h": 3.92e-06,
         "dv_median_km_s": 1.6822,
         "v_rms_km_s": 295.642,
-        "hmf_10k_cpu_test": [92, 92],
-        "hmf_100k_cpu_test": [17, 17]
-      }
+        "hmf_10k_cpu_test": [
+          92,
+          92
+        ],
+        "hmf_100k_cpu_test": [
+          17,
+          17
+        ]
+      },
+      "total_active_updates": 942336982,
+      "throughput_m_particles_per_s_evo": 18.8354,
+      "throughput_m_particles_per_s_per_gpu": 18.8354,
+      "gpu_j_per_m_particle_step": 15.01,
+      "node_j_per_m_particle_step": 22.4
     },
     {
       "id": "grav_gpu_2g_3d_eager",
@@ -259,9 +327,20 @@
         "dr_median_mpc_h": 3.81e-06,
         "dv_median_km_s": 1.6825,
         "v_rms_km_s": 295.676,
-        "hmf_10k_cpu_test": [92, 92],
-        "hmf_100k_cpu_test": [17, 17]
-      }
+        "hmf_10k_cpu_test": [
+          92,
+          92
+        ],
+        "hmf_100k_cpu_test": [
+          17,
+          17
+        ]
+      },
+      "total_active_updates": 942750252,
+      "throughput_m_particles_per_s_evo": 32.8713,
+      "throughput_m_particles_per_s_per_gpu": 16.4357,
+      "gpu_j_per_m_particle_step": 15.78,
+      "node_j_per_m_particle_step": 20.19
     },
     {
       "id": "grav_gpu_2g_3d_lazy",
@@ -286,9 +365,20 @@
         "dr_median_mpc_h": 3.92e-06,
         "dv_median_km_s": 1.6823,
         "v_rms_km_s": 295.642,
-        "hmf_10k_cpu_test": [92, 92],
-        "hmf_100k_cpu_test": [17, 17]
-      }
+        "hmf_10k_cpu_test": [
+          92,
+          92
+        ],
+        "hmf_100k_cpu_test": [
+          17,
+          17
+        ]
+      },
+      "total_active_updates": 942336969,
+      "throughput_m_particles_per_s_evo": 32.8799,
+      "throughput_m_particles_per_s_per_gpu": 16.4399,
+      "gpu_j_per_m_particle_step": 15.93,
+      "node_j_per_m_particle_step": 20.15
     },
     {
       "id": "grav_gpu_4g_3d_eager",
@@ -313,9 +403,20 @@
         "dr_median_mpc_h": 3.81e-06,
         "dv_median_km_s": 1.6825,
         "v_rms_km_s": 295.676,
-        "hmf_10k_cpu_test": [92, 92],
-        "hmf_100k_cpu_test": [17, 17]
-      }
+        "hmf_10k_cpu_test": [
+          92,
+          92
+        ],
+        "hmf_100k_cpu_test": [
+          17,
+          17
+        ]
+      },
+      "total_active_updates": 942749952,
+      "throughput_m_particles_per_s_evo": 44.7437,
+      "throughput_m_particles_per_s_per_gpu": 11.1859,
+      "gpu_j_per_m_particle_step": 20.54,
+      "node_j_per_m_particle_step": 24.39
     },
     {
       "id": "grav_gpu_4g_3d_lazy",
@@ -340,9 +441,20 @@
         "dr_median_mpc_h": 3.92e-06,
         "dv_median_km_s": 1.6822,
         "v_rms_km_s": 295.642,
-        "hmf_10k_cpu_test": [92, 92],
-        "hmf_100k_cpu_test": [17, 17]
-      }
+        "hmf_10k_cpu_test": [
+          92,
+          92
+        ],
+        "hmf_100k_cpu_test": [
+          17,
+          17
+        ]
+      },
+      "total_active_updates": 942336929,
+      "throughput_m_particles_per_s_evo": 49.6228,
+      "throughput_m_particles_per_s_per_gpu": 12.4057,
+      "gpu_j_per_m_particle_step": 20.05,
+      "node_j_per_m_particle_step": 23.64
     }
   ],
   "energy_highlights": {
@@ -356,7 +468,10 @@
     "grav_2g_3d_vs_gadget4_node_scaled_ratio": 20.99,
     "full_history_1024_context": {
       "cpu_256t_kwh_at_700w": 213.1,
-      "grav_4g_measured_power_kwh_range": [28.3, 29.5],
+      "grav_4g_measured_power_kwh_range": [
+        28.3,
+        29.5
+      ],
       "measured_4g_gpu_power_w_z0": 657.1,
       "measured_4g_gpu_power_w_z2_solo": 735.9,
       "measured_1g_gpu_power_w": 217.4,

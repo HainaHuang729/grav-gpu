@@ -540,6 +540,20 @@
             <td class="num">Virial 2T/|U| = 0.996&ndash;0.999</td>
           </tr>
           <tr>
+            <td><strong>64&sup3; Zel'dovich Plane Wave</strong> (EdS, a=0.02&rarr;0.50)</td>
+            <td class="num">6.71 s &middot; 513 steps</td>
+            <td class="num"><span class="pill ok">&Delta;x/L = 4.41 &times; 10<sup>&minus;4</sup></span></td>
+            <td class="num">&Delta;v/v<sub>pk</sub> = 0.592%</td>
+            <td class="num">Transverse v<sub>RMS</sub> = 0.070 km/s</td>
+          </tr>
+          <tr>
+            <td><strong>Exact Periodic Ewald &theta;-Sweep</strong> (64&sup3;, 4,096 tgt)</td>
+            <td class="num">&theta; = 0.9 &rarr; 0.3</td>
+            <td class="num"><span class="pill ok">Short 8.48e-3 &rarr; 1.14e-4</span></td>
+            <td class="num">Tot 1.98e-3 @&theta;=0.7</td>
+            <td class="num">Tot 1.03e-3 @&theta;=0.3 (PM floor)</td>
+          </tr>
+          <tr>
             <td><strong>4-GPU 3D vs 1-GPU 1D Step-0 Force</strong></td>
             <td class="num">16.78M particles</td>
             <td class="num">Pot med 8.88 &times; 10<sup>&minus;6</sup></td>
@@ -675,10 +689,10 @@ python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_c
         ],
         metrics: [
           ["Matched Physics", "a9 node · 256³ · a=0.855→0.92 · θ=0.70"],
-          ["GPU-Only Savings (vs SWIFT)", "34.7× (1G: 3.93 Wh vs 136.2 Wh)"],
+          ["Active Throughput (4G / 1G)", "49.62 M/s (12.41/GPU) · 18.84 M/s"],
+          ["Energy / M-Updates (GPU / Node)", "15.01–20.05 J GPU · 20.15–23.64 J Node"],
+          ["Ref Codes J/M-step", "SWIFT 519.9 J · PKD 285.9–374.0 J (GPU)"],
           ["Lowest Node Energy (2× A6000)", "5.27 Wh (-96.1%, 25.8× savings)"],
-          ["Fastest Wall Time (4× Lazy)", "18.99 s evo / 28.26 s wall (28.9×)"],
-          ["PKDGRAV3 256³ Bottleneck", "3–6% GPU util (CPU DD+Tree ~40–46%)"],
           ["1024³ Live 4G Power Range", "657–736 W · 28.3–29.5 vs 213.1 kWh (-86%)"]
         ]
       },
