@@ -40,7 +40,7 @@ __global__ void native_m2p_pair(
   if (!accept) return;
 
   reduced_grav_tensor field{};
-  swift_cuda_gravity_M2P(&src->expansion,dx,dy,dz,r2,hmax,
+  grav_cuda_gravity_M2P(&src->expansion,dx,dy,dz,r2,hmax,
                         periodic && !use_full[job.x],r_s_inv,&field);
   out[result].values_i={field.F_100,field.F_010,field.F_001,field.F_000};
   m2p.mask[result]=1;

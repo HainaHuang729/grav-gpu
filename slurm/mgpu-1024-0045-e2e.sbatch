@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=swift-mgpu0045
+#SBATCH --job-name=grav-mgpu0045
 #SBATCH --partition=a
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=64
@@ -9,9 +9,9 @@
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-$SLURM_SUBMIT_DIR}"
-SWIFT_BUILD_DIR="${SWIFT_BUILD_DIR:?Set SWIFT_BUILD_DIR to a GPU-configured upstream SWIFT build/source directory}"
+KERNEL_BUILD_DIR="${KERNEL_BUILD_DIR:?Set KERNEL_BUILD_DIR to a GPU-configured upstream SWIFT build/source directory}"
 DATA_DIR="${DATA_DIR:?Set DATA_DIR containing PL_25_1024_0044.hdf5, PL_25_1024_0045.hdf5, fof_output_0045.hdf5}"
-SWIFT_CPU_FOF="${SWIFT_CPU_FOF:?Set SWIFT_CPU_FOF to standalone CPU SWIFT fof binary path}"
+REF_CPU_FOF="${REF_CPU_FOF:?Set REF_CPU_FOF to standalone CPU SWIFT fof binary path}"
 FOF_YML="${FOF_YML:?Set FOF_YML to SWIFT FoF YAML config path}"
 REPORT_DIR="${REPORT_DIR:-$REPO_DIR/reports}"
 CUDA_HOME="${CUDA_HOME:-$(dirname "$(dirname "$(command -v nvcc)")")}"
@@ -32,7 +32,7 @@ A_0044="0.32967201974804095"
 A_0045="0.36263922172284535"
 
 mkdir -p "$REPO_DIR/logs" "$REPORT_DIR"
-work=$(mktemp -d /tmp/swift-mgpu1024-0045.XXXXXX)
+work=$(mktemp -d /tmp/grav-mgpu1024-0045.XXXXXX)
 SMI_PID=
 trap 'if [[ -n "${SMI_PID:-}" ]]; then kill "$SMI_PID" 2>/dev/null || true; fi; rm -rf -- "$work"' EXIT
 
@@ -43,17 +43,17 @@ nvidia-smi topo -m >>"$REPORT_DIR/mgpu4-1024-0045-device.csv" || true
 
 mkdir -p "$work/build/src"
 for f in runner_gpu.h runner_gpu.c gpu_gravity_offload.cu gpu_gravity_functions.cuh kernel_gravity.h kernel_long_gravity.h gravity_derivatives.h multipole.h; do
-    cp "$SWIFT_BUILD_DIR/src/$f" "$work/build/src/"
+    cp "$KERNEL_BUILD_DIR/src/$f" "$work/build/src/"
 done
-cp "$SWIFT_BUILD_DIR/config.h" "$work/build/"
+cp "$KERNEL_BUILD_DIR/config.h" "$work/build/"
 "$PYTHON_BIN" "$REPO_DIR/src/make-evolution.py" "$work/build" "$REPO_DIR"
-SWIFT_M2P_MATH_ONLY=1 SWIFT_GROUP_M2L=1 "$PYTHON_BIN" "$REPO_DIR/m2p/make-port.py" "$work/build"
+GRAV_M2P_MATH_ONLY=1 GRAV_GROUP_M2L=1 "$PYTHON_BIN" "$REPO_DIR/m2p/make-port.py" "$work/build"
 
-"$CUDA_HOME/bin/nvcc" -O3 -std=c++17 -arch="$CUDA_ARCH" --fmad=true -DSWIFT_FAST_M2P_EXP \
+"$CUDA_HOME/bin/nvcc" -O3 -std=c++17 -arch="$CUDA_ARCH" --fmad=true -DGRAV_FAST_M2P_EXP \
     -Xcompiler -fopenmp -Xptxas=-v -ccbin="$CXX_BIN" \
-    -I"$work/build" -I"$work/build/src" -I"$SWIFT_BUILD_DIR/src" -I"$REPO_DIR/src" -I"$MATHLIB_INC" \
+    -I"$work/build" -I"$work/build/src" -I"$KERNEL_BUILD_DIR/src" -I"$REPO_DIR/src" -I"$MATHLIB_INC" \
     -L"$MATHLIB_LIB" \
-    "$REPO_DIR/src/multi_gpu_slab.cu" "$REPO_DIR/src/swift_cuda_pm.cu" "$REPO_DIR/src/swift_cuda_pm_dist.cu" "$REPO_DIR/src/swift_cuda_fof.cu" \
+    "$REPO_DIR/src/multi_gpu_slab.cu" "$REPO_DIR/src/grav_cuda_pm.cu" "$REPO_DIR/src/grav_cuda_pm_dist.cu" "$REPO_DIR/src/grav_cuda_fof.cu" \
     -lcufft -o "$work/multi_gpu_slab" >"$REPORT_DIR/mgpu4-1024-0045-build.log" 2>&1
 
 "$CC_BIN" -O3 -march=native -shared -fPIC "$REPO_DIR/src/cic_deposit.c" -lm -o "$work/libcic_deposit.so" >>"$REPORT_DIR/mgpu4-1024-0045-build.log" 2>&1
@@ -66,9 +66,9 @@ nvidia-smi --query-gpu=timestamp,index,memory.used,memory.total,utilization.gpu,
     --format=csv -l 5 >"$REPORT_DIR/mgpu4-1024-0045-gpu-telemetry.csv" &
 SMI_PID=$!
 
-OMP_NUM_THREADS=4 SWIFT_NUM_GPUS=4 SWIFT_P2P_MODE=nvlink SWIFT_UNLINK_INPUT_AFTER_LOAD=1 \
-    SWIFT_DYNAMIC_PM=1 SWIFT_LEAF_LIMIT=64 SWIFT_GRAV_G=43.0092 SWIFT_WARP_M2L=1 SWIFT_FAST_SPLIT=1 \
-    SWIFT_FORCE3_OUT="$work/force3-0045.bin" \
+OMP_NUM_THREADS=4 GRAV_NUM_GPUS=4 GRAV_P2P_MODE=nvlink GRAV_UNLINK_INPUT_AFTER_LOAD=1 \
+    GRAV_DYNAMIC_PM=1 GRAV_LEAF_LIMIT=64 GRAV_G=43.0092 GRAV_WARP_M2L=1 GRAV_FAST_SPLIT=1 \
+    GRAV_FORCE3_OUT="$work/force3-0045.bin" \
     stdbuf -oL -eL "$work/multi_gpu_slab" "$work/input_0044.bin" "$work/evolved-0045.bin" "$A_0045" \
     >"$REPORT_DIR/mgpu4-1024-0045-evolve.log" 2>&1
 
@@ -115,13 +115,13 @@ open(dst_yml, "w").write("\n".join(out) + "\n")
 PY
 
 t0=$(date +%s.%N)
-"$SWIFT_CPU_FOF" --cosmology --threads="${SLURM_CPUS_PER_TASK:-64}" --verbose=1 fof_0045.yml \
+"$REF_CPU_FOF" --cosmology --threads="${SLURM_CPUS_PER_TASK:-64}" --verbose=1 fof_0045.yml \
     >"$REPORT_DIR/mgpu4-1024-0045-fof.log" 2>&1
 t1=$(date +%s.%N)
 "$PYTHON_BIN" -c "print(f'{float(${t1}) - float(${t0}):.6f}')" >"$REPORT_DIR/mgpu4-1024-0045-fof.seconds"
 
 gpu_fof=$(ls -1 "$work"/fof_output*.hdf5 | head -n 1)
-SWIFT_CIC_LIB="$work/libcic_deposit.so" "$PYTHON_BIN" "$REPO_DIR/scripts/eval_1024_snapshot.py" \
+GRAV_CIC_LIB="$work/libcic_deposit.so" "$PYTHON_BIN" "$REPO_DIR/scripts/eval_1024_snapshot.py" \
     "$DATA_DIR/PL_25_1024_0045.hdf5" \
     "$work/snapshot_0045.hdf5" \
     "$DATA_DIR/fof_output_0045.hdf5" \

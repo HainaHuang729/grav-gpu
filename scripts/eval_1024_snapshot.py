@@ -54,7 +54,7 @@ def _get_cic_fn():
     global _CIC_FN
     if _CIC_FN != "UNSET":
         return _CIC_FN
-    lib_path = os.environ.get("SWIFT_CIC_LIB")
+    lib_path = os.environ.get("GRAV_CIC_LIB")
     if lib_path:
         lib = ctypes.CDLL(lib_path)
     else:
@@ -65,7 +65,7 @@ def _get_cic_fn():
         if not src.exists() or not cc:
             _CIC_FN = None
             return None
-        tmp_dir = tempfile.mkdtemp(prefix="swift_cic_")
+        tmp_dir = tempfile.mkdtemp(prefix="grav_cic_")
         atexit.register(shutil.rmtree, tmp_dir, True)
         so_path = Path(tmp_dir) / "libcic_deposit.so"
         try:

@@ -1,5 +1,5 @@
-#ifndef SWIFT_CUDA_PM_DIST_H
-#define SWIFT_CUDA_PM_DIST_H
+#ifndef GRAV_CUDA_PM_DIST_H
+#define GRAV_CUDA_PM_DIST_H
 
 #include <cuda_runtime.h>
 #include <cstddef>
@@ -11,13 +11,13 @@
  * for non-NVLink pairs, avoiding unsafe cross-socket PCIe P2P).
  * Holds only ~O(N^3 / G) mesh memory per GPU with zero CPU computation and
  * supports G >= 2 GPUs with arbitrary Stage-4B per-GPU X-plane sets. */
-class SwiftDistPm {
+class GravDistPm {
  public:
-  SwiftDistPm();
-  ~SwiftDistPm();
+  GravDistPm();
+  ~GravDistPm();
 
-  SwiftDistPm(const SwiftDistPm&) = delete;
-  SwiftDistPm& operator=(const SwiftDistPm&) = delete;
+  GravDistPm(const GravDistPm&) = delete;
+  GravDistPm& operator=(const GravDistPm&) = delete;
 
   void init(const std::vector<int>& devs,
             const std::vector<cudaStream_t>& streams,

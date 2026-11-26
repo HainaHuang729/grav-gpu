@@ -1,17 +1,17 @@
 #include "config.h"
-#include "swift_cuda_pm.h"
+#include "grav_cuda_pm.h"
 
 // Read the split choice from SWIFT's source header in both standalone and
 // integrated builds, even when that header is not in the include chain yet.
 #ifndef SWIFT_KERNEL_LONG_GRAVITY_H
 #ifndef restrict
 #define restrict __restrict__
-#define SWIFT_PM_LOCAL_RESTRICT
+#define GRAV_PM_LOCAL_RESTRICT
 #endif
 #include "kernel_long_gravity.h"
-#ifdef SWIFT_PM_LOCAL_RESTRICT
+#ifdef GRAV_PM_LOCAL_RESTRICT
 #undef restrict
-#undef SWIFT_PM_LOCAL_RESTRICT
+#undef GRAV_PM_LOCAL_RESTRICT
 #endif
 #endif
 
@@ -64,13 +64,13 @@ struct CIC {
       weight[axis][0] = 1.-weight[axis][1];
     }
   }
-  __device__ explicit CIC(const swift_pm_particle& p, int n, double box)
+  __device__ explicit CIC(const grav_pm_particle& p, int n, double box)
       : CIC(p.x[0], p.x[1], p.x[2], n, box) {}
 };
 
-__device__ __forceinline__ const swift_pm_particle& pm_particle_at(
+__device__ __forceinline__ const grav_pm_particle& pm_particle_at(
     const void* particles, size_t stride_bytes, size_t i) {
-  return *reinterpret_cast<const swift_pm_particle*>(
+  return *reinterpret_cast<const grav_pm_particle*>(
       reinterpret_cast<const char*>(particles) + i * stride_bytes);
 }
 
@@ -137,7 +137,7 @@ __global__ void differentiate(const double* potential, double4* field, int n, do
     potential[i]};
 }
 
-__global__ void interpolate(const void* particles, size_t stride_bytes, swift_pm_force* result,
+__global__ void interpolate(const void* particles, size_t stride_bytes, grav_pm_force* result,
                              size_t count, const double4* field, int n, double box, float G) {
   const size_t i=size_t(blockIdx.x)*blockDim.x+threadIdx.x;
   if (i>=count) return;
@@ -194,8 +194,8 @@ struct Workspace {
   double* potential=nullptr;
   double4* field=nullptr;
   cufftDoubleComplex* modes=nullptr;
-  swift_pm_particle* inputs=nullptr;
-  swift_pm_force* outputs=nullptr;
+  grav_pm_particle* inputs=nullptr;
+  grav_pm_force* outputs=nullptr;
   cufftHandle forward, reverse;
   cudaStream_t stream;
   size_t capacity=0;
@@ -317,7 +317,7 @@ void enqueue_transform(Workspace& w,int side,double box,double split,cudaStream_
 }
 
 void enqueue_interpolate(Workspace& w,const void* particles,size_t stride_bytes,
-                         swift_pm_force* result,size_t count,int side,double box,float G,
+                         grav_pm_force* result,size_t count,int side,double box,float G,
                          cudaStream_t stream) {
   const size_t points=size_t(side)*side*side;
   differentiate<<<blocks(points),block_size,0,stream>>>(w.potential,w.field,side,side/box);
@@ -327,9 +327,9 @@ void enqueue_interpolate(Workspace& w,const void* particles,size_t stride_bytes,
 
 }
 
-extern "C" void swift_pm_cuda_device(const swift_pm_particle* particles, size_t count,
+extern "C" void grav_pm_cuda_device(const grav_pm_particle* particles, size_t count,
                                       int side, double box, double split, float G,
-                                      swift_pm_force* result, swift_pm_timing* timing) {
+                                      grav_pm_force* result, grav_pm_timing* timing) {
   *timing={};
   if (!count) return;
   auto& w=workspace();
@@ -337,27 +337,27 @@ extern "C" void swift_pm_cuda_device(const swift_pm_particle* particles, size_t 
   check(cufftSetStream(w.forward,w.stream));
   check(cufftSetStream(w.reverse,w.stream));
   timing->deposit_ms=measure(w.stream,[&]{
-    enqueue_deposit(w,particles,sizeof(swift_pm_particle),count,side,box,w.stream);
+    enqueue_deposit(w,particles,sizeof(grav_pm_particle),count,side,box,w.stream);
   });
   timing->fft_ms=measure(w.stream,[&]{
     enqueue_transform(w,side,box,split,w.stream);
   });
   timing->interpolate_ms=measure(w.stream,[&]{
-    enqueue_interpolate(w,particles,sizeof(swift_pm_particle),result,count,side,box,G,w.stream);
+    enqueue_interpolate(w,particles,sizeof(grav_pm_particle),result,count,side,box,G,w.stream);
   });
 }
 
-extern "C" void swift_pm_cuda_graph_prepare(int side,void* stream) {
+extern "C" void grav_pm_cuda_graph_prepare(int side,void* stream) {
   auto& w=workspace();
   w.mesh_for(side);
   check(cufftSetStream(w.forward,static_cast<cudaStream_t>(stream)));
   check(cufftSetStream(w.reverse,static_cast<cudaStream_t>(stream)));
 }
 
-extern "C" void swift_pm_cuda_graph_enqueue_strided(const void* particles,
+extern "C" void grav_pm_cuda_graph_enqueue_strided(const void* particles,
                                                     size_t stride_bytes,
                                                     size_t count,int side,double box,double split,float G,
-                                                    swift_pm_force* result,void* handle) {
+                                                    grav_pm_force* result,void* handle) {
   auto& w=workspace();
   const auto stream=static_cast<cudaStream_t>(handle);
   enqueue_deposit(w,particles,stride_bytes,count,side,box,stream);
@@ -366,13 +366,13 @@ extern "C" void swift_pm_cuda_graph_enqueue_strided(const void* particles,
   check(cudaGetLastError());
 }
 
-extern "C" void swift_pm_cuda_graph_enqueue(const swift_pm_particle* particles,
+extern "C" void grav_pm_cuda_graph_enqueue(const grav_pm_particle* particles,
                                             size_t count,int side,double box,double split,float G,
-                                            swift_pm_force* result,void* handle) {
-  swift_pm_cuda_graph_enqueue_strided(particles,sizeof(swift_pm_particle),count,side,box,split,G,result,handle);
+                                            grav_pm_force* result,void* handle) {
+  grav_pm_cuda_graph_enqueue_strided(particles,sizeof(grav_pm_particle),count,side,box,split,G,result,handle);
 }
 
-extern "C" void swift_pm_cuda_begin(int side,void* handle) {
+extern "C" void grav_pm_cuda_begin(int side,void* handle) {
   auto& w=workspace();
   const auto stream=static_cast<cudaStream_t>(handle);
   w.mesh_for(side);
@@ -382,7 +382,7 @@ extern "C" void swift_pm_cuda_begin(int side,void* handle) {
   check(cudaMemsetAsync(w.potential,0,points*sizeof(*w.potential),stream));
 }
 
-extern "C" void swift_pm_cuda_deposit_double3(const void* d_x_double3,
+extern "C" void grav_pm_cuda_deposit_double3(const void* d_x_double3,
                                               const float* d_mass_or_null,
                                               float uniform_mass,size_t count,
                                               int side,double box,void* handle) {
@@ -395,7 +395,7 @@ extern "C" void swift_pm_cuda_deposit_double3(const void* d_x_double3,
   check(cudaGetLastError());
 }
 
-extern "C" void swift_pm_cuda_solve(int side,double box,double split,void* handle) {
+extern "C" void grav_pm_cuda_solve(int side,double box,double split,void* handle) {
   auto& w=workspace();
   const auto stream=static_cast<cudaStream_t>(handle);
   enqueue_transform(w,side,box,split,stream);
@@ -404,7 +404,7 @@ extern "C" void swift_pm_cuda_solve(int side,double box,double split,void* handl
   check(cudaGetLastError());
 }
 
-extern "C" void swift_pm_cuda_interpolate_double3(const void* d_x_double3,size_t count,
+extern "C" void grav_pm_cuda_interpolate_double3(const void* d_x_double3,size_t count,
                                                   int side,double box,float grav_G,
                                                   void* d_acc_float3,float* d_pot_or_null,
                                                   void* handle) {
@@ -417,23 +417,23 @@ extern "C" void swift_pm_cuda_interpolate_double3(const void* d_x_double3,size_t
   check(cudaGetLastError());
 }
 
-extern "C" void swift_pm_cuda_host(const swift_pm_particle* particles, size_t count,
+extern "C" void grav_pm_cuda_host(const grav_pm_particle* particles, size_t count,
                                     int side, double box, double split, float G,
-                                    swift_pm_force* result, swift_pm_timing* timing) {
+                                    grav_pm_force* result, grav_pm_timing* timing) {
   if (!count) { *timing={}; return; }
   auto& w=workspace();
   w.particles_for(count);
   const double upload=measure(w.stream,[&]{
     check(cudaMemcpyAsync(w.inputs,particles,count*sizeof(*particles),cudaMemcpyHostToDevice,w.stream));
   });
-  swift_pm_cuda_device(w.inputs,count,side,box,split,G,w.outputs,timing);
+  grav_pm_cuda_device(w.inputs,count,side,box,split,G,w.outputs,timing);
   timing->import_ms=upload;
   timing->export_ms=measure(w.stream,[&]{
     check(cudaMemcpyAsync(result,w.outputs,count*sizeof(*result),cudaMemcpyDeviceToHost,w.stream));
   });
 }
 
-extern "C" void swift_pm_cuda_deposit_buf(const void* d_x_double3,
+extern "C" void grav_pm_cuda_deposit_buf(const void* d_x_double3,
                                           const float* d_mass_or_null,
                                           float uniform_mass, size_t count,
                                           double* d_density, int side,
@@ -446,7 +446,7 @@ extern "C" void swift_pm_cuda_deposit_buf(const void* d_x_double3,
   check(cudaGetLastError());
 }
 
-extern "C" void swift_pm_cuda_solve_on_device(double* d_density, void* d_field_double4,
+extern "C" void grav_pm_cuda_solve_on_device(double* d_density, void* d_field_double4,
                                               int side, double box, double split,
                                               void* handle) {
   const auto stream=static_cast<cudaStream_t>(handle);
@@ -462,7 +462,7 @@ extern "C" void swift_pm_cuda_solve_on_device(double* d_density, void* d_field_d
   check(cudaGetLastError());
 }
 
-extern "C" void swift_pm_cuda_interpolate_buf(const void* d_x_double3, size_t count,
+extern "C" void grav_pm_cuda_interpolate_buf(const void* d_x_double3, size_t count,
                                               const void* d_field_double4, int side,
                                               double box, float grav_G,
                                               void* d_acc_float3, float* d_pot_or_null,

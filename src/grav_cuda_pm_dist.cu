@@ -1,17 +1,17 @@
 #include "config.h"
-#include "swift_cuda_pm_dist.h"
+#include "grav_cuda_pm_dist.h"
 
 // Read the split choice from SWIFT's source header in both standalone and
 // integrated builds, even when that header is not in the include chain yet.
 #ifndef SWIFT_KERNEL_LONG_GRAVITY_H
 #ifndef restrict
 #define restrict __restrict__
-#define SWIFT_PM_DIST_LOCAL_RESTRICT
+#define GRAV_PM_DIST_LOCAL_RESTRICT
 #endif
 #include "kernel_long_gravity.h"
-#ifdef SWIFT_PM_DIST_LOCAL_RESTRICT
+#ifdef GRAV_PM_DIST_LOCAL_RESTRICT
 #undef restrict
-#undef SWIFT_PM_DIST_LOCAL_RESTRICT
+#undef GRAV_PM_DIST_LOCAL_RESTRICT
 #endif
 #endif
 
@@ -43,7 +43,7 @@ void check_cuda(cudaError_t st, int line) {
 void check_cufft(cufftResult st, int line) {
   if (st != CUFFT_SUCCESS) {
     std::fprintf(stderr, "SWIFT DIST PM cuFFT error %d line %d\n", int(st), line);
-    throw std::runtime_error("cuFFT failure in SwiftDistPm");
+    throw std::runtime_error("cuFFT failure in GravDistPm");
   }
 }
 
@@ -396,7 +396,7 @@ std::vector<int> sanitize_planes(std::vector<int> planes, int side) {
 
 }  // namespace
 
-struct SwiftDistPm::Impl {
+struct GravDistPm::Impl {
   bool active = false;
   int G = 0;
   int side = 0;
@@ -460,7 +460,7 @@ struct SwiftDistPm::Impl {
 
   void apply_planes(const std::vector<std::vector<int>>& gpu_x_planes, bool initial_alloc) {
     if (int(gpu_x_planes.size()) != G) {
-      throw std::runtime_error("SwiftDistPm: gpu_x_planes size != G");
+      throw std::runtime_error("GravDistPm: gpu_x_planes size != G");
     }
     int prev_dev = 0;
     CHECK_CUDA(cudaGetDevice(&prev_dev));
@@ -572,7 +572,7 @@ struct SwiftDistPm::Impl {
       CHECK_CUDA(cudaStreamSynchronize(streams[g]));
       if (oob != 0) {
         CHECK_CUDA(cudaSetDevice(prev_dev));
-        throw std::runtime_error("SwiftDistPm: particle touched non-local X-plane " +
+        throw std::runtime_error("GravDistPm: particle touched non-local X-plane " +
                                  std::to_string(oob - 1) + " on GPU " + std::to_string(g));
       }
     }
@@ -580,16 +580,16 @@ struct SwiftDistPm::Impl {
   }
 };
 
-SwiftDistPm::SwiftDistPm() : impl_(std::make_unique<Impl>()) {}
+GravDistPm::GravDistPm() : impl_(std::make_unique<Impl>()) {}
 
-SwiftDistPm::~SwiftDistPm() {
+GravDistPm::~GravDistPm() {
   try {
     destroy();
   } catch (...) {
   }
 }
 
-void SwiftDistPm::init(const std::vector<int>& devs,
+void GravDistPm::init(const std::vector<int>& devs,
                        const std::vector<cudaStream_t>& streams,
                        const std::vector<std::vector<int>>& can_peer,
                        int side,
@@ -597,21 +597,21 @@ void SwiftDistPm::init(const std::vector<int>& devs,
   destroy();
   const int G = int(devs.size());
   if (G < 2 || G > dist_pm_max_gpus) {
-    throw std::runtime_error("SwiftDistPm requires 2 <= G <= 16, got " + std::to_string(G));
+    throw std::runtime_error("GravDistPm requires 2 <= G <= 16, got " + std::to_string(G));
   }
   if (int(streams.size()) != G) {
-    throw std::runtime_error("SwiftDistPm: streams size != devs size");
+    throw std::runtime_error("GravDistPm: streams size != devs size");
   }
   if (int(can_peer.size()) != G) {
-    throw std::runtime_error("SwiftDistPm: can_peer rows != G");
+    throw std::runtime_error("GravDistPm: can_peer rows != G");
   }
   for (int g = 0; g < G; ++g) {
     if (int(can_peer[g].size()) != G) {
-      throw std::runtime_error("SwiftDistPm: can_peer cols != G");
+      throw std::runtime_error("GravDistPm: can_peer cols != G");
     }
   }
   if (side < 2 * G || (side & 1) != 0) {
-    throw std::runtime_error("SwiftDistPm requires even side >= 2 * G");
+    throw std::runtime_error("GravDistPm requires even side >= 2 * G");
   }
 
   auto& im = *impl_;
@@ -634,7 +634,7 @@ void SwiftDistPm::init(const std::vector<int>& devs,
     im.ny[g] = im.splits.y0[g + 1] - im.splits.y0[g];
     max_nx_ny = std::max(max_nx_ny, std::max(im.nx[g], im.ny[g]));
     if (im.nx[g] < 2 || im.ny[g] < 1) {
-      throw std::runtime_error("SwiftDistPm: slab width too narrow for 4th-order stencil");
+      throw std::runtime_error("GravDistPm: slab width too narrow for 4th-order stencil");
     }
   }
   const size_t a2a_max_bytes =
@@ -742,17 +742,17 @@ void SwiftDistPm::init(const std::vector<int>& devs,
   }
 }
 
-void SwiftDistPm::reconfigure_x_planes(const std::vector<std::vector<int>>& gpu_x_planes) {
-  if (!impl_->active) throw std::runtime_error("SwiftDistPm not initialized");
+void GravDistPm::reconfigure_x_planes(const std::vector<std::vector<int>>& gpu_x_planes) {
+  if (!impl_->active) throw std::runtime_error("GravDistPm not initialized");
   impl_->apply_planes(gpu_x_planes, false);
 }
 
-size_t SwiftDistPm::device_bytes(int g) const {
+size_t GravDistPm::device_bytes(int g) const {
   if (!impl_->active || g < 0 || g >= impl_->G) return 0;
   return impl_->fixed_bytes[g] + impl_->local_bytes[g];
 }
 
-void SwiftDistPm::begin_deposit(int g) {
+void GravDistPm::begin_deposit(int g) {
   auto& im = *impl_;
   CHECK_CUDA(cudaMemsetAsync(im.d_oob[g], 0, sizeof(int), im.streams[g]));
   const size_t lnx = im.local_planes[g].size();
@@ -762,7 +762,7 @@ void SwiftDistPm::begin_deposit(int g) {
   }
 }
 
-void SwiftDistPm::deposit(int g, const void* d_x_double3, const float* d_mass_or_null,
+void GravDistPm::deposit(int g, const void* d_x_double3, const float* d_mass_or_null,
                           float uniform_mass, size_t count, double box) {
   if (!count) return;
   auto& im = *impl_;
@@ -775,9 +775,9 @@ void SwiftDistPm::deposit(int g, const void* d_x_double3, const float* d_mass_or
   CHECK_CUDA(cudaGetLastError());
 }
 
-void SwiftDistPm::solve_and_gather(double box, double split) {
+void GravDistPm::solve_and_gather(double box, double split) {
   auto& im = *impl_;
-  if (!im.active) throw std::runtime_error("SwiftDistPm not initialized");
+  if (!im.active) throw std::runtime_error("GravDistPm not initialized");
   int prev_dev = 0;
   CHECK_CUDA(cudaGetDevice(&prev_dev));
 
@@ -994,7 +994,7 @@ void SwiftDistPm::solve_and_gather(double box, double split) {
   }
 }
 
-void SwiftDistPm::interpolate(int g, const void* d_x_double3, size_t count,
+void GravDistPm::interpolate(int g, const void* d_x_double3, size_t count,
                               double box, float grav_G, void* d_acc_float3,
                               float* d_pot_or_null) {
   if (!count) return;
@@ -1007,7 +1007,7 @@ void SwiftDistPm::interpolate(int g, const void* d_x_double3, size_t count,
   CHECK_CUDA(cudaGetLastError());
 }
 
-void SwiftDistPm::debug_copy_slab_field_to_host(double4* h_full_field) const {
+void GravDistPm::debug_copy_slab_field_to_host(double4* h_full_field) const {
   auto& im = *impl_;
   if (!im.active || !h_full_field) return;
   int prev_dev = 0;
@@ -1025,7 +1025,7 @@ void SwiftDistPm::debug_copy_slab_field_to_host(double4* h_full_field) const {
   CHECK_CUDA(cudaSetDevice(prev_dev));
 }
 
-void SwiftDistPm::destroy() {
+void GravDistPm::destroy() {
   auto& im = *impl_;
   if (!im.active) return;
   int prev_dev = 0;

@@ -239,12 +239,12 @@ __global__ void multipoles(const Geometry* geometry,probe_node* moments,
   moments[i]=out;
 }
 
-__global__ void pm_input(const probe_particle* in, swift_pm_particle* out,int n) {
+__global__ void pm_input(const probe_particle* in, grav_pm_particle* out,int n) {
   const int i=blockIdx.x*blockDim.x+threadIdx.x;
   if(i<n) out[i]=in[i].pm;
 }
 
-__global__ void pm_audit(const swift_pm_force* forces,int n,int* invalid) {
+__global__ void pm_audit(const grav_pm_force* forces,int n,int* invalid) {
   const int i=blockIdx.x*blockDim.x+threadIdx.x;
   if(i<n && (!isfinite(forces[i].potential) ||
       !isfinite(forces[i].acceleration[0]) || !isfinite(forces[i].acceleration[1]) ||
@@ -271,8 +271,8 @@ int main(int argc,char** argv) {
   Device<int> order(n), cursor(1), invalid(1);
   Device<Geometry> geometry(capacity);
   Device<probe_node> moments(capacity);
-  Device<swift_pm_particle> mesh_particles(n);
-  Device<swift_pm_force> mesh_forces(n);
+  Device<grav_pm_particle> mesh_particles(n);
+  Device<grav_pm_force> mesh_forces(n);
   check(cudaMemcpy(particles.p,input.data(),n*sizeof(probe_particle),cudaMemcpyHostToDevice));
   check(cudaMemset(invalid.p,0,sizeof(int)));
   const float sort_ms=ms([&]{
@@ -303,8 +303,8 @@ int main(int argc,char** argv) {
 
   // Keep the particle state on the device between the tree and PM.
   const float mesh_view_ms=ms([&]{pm_input<<<blocks(n),128>>>(particles.p,mesh_particles.p,n);});
-  swift_pm_timing pm{};
-  swift_pm_cuda_device(mesh_particles.p,n,h.mesh,h.box,h.smoothing,h.grav_G,mesh_forces.p,&pm);
+  grav_pm_timing pm{};
+  grav_pm_cuda_device(mesh_particles.p,n,h.mesh,h.box,h.smoothing,h.grav_G,mesh_forces.p,&pm);
   pm_audit<<<blocks(n),128>>>(mesh_forces.p,n,invalid.p);
   int pm_invalid=0;
   check(cudaMemcpy(&pm_invalid,invalid.p,sizeof(int),cudaMemcpyDeviceToHost));

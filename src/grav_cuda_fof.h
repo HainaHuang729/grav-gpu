@@ -15,10 +15,10 @@ int whole_fof(const double* host, int count,
 
 // SWIFT/HBT+-compatible periodic GPU FoF:
 // Outputs int64 group IDs (1..num_groups ordered by descending size; ungrouped/size < min_group_size = 2147483647).
-int whole_fof_swift(const double* host, int count,
+int whole_fof_ranked(const double* host, int count,
                     double lx, double ly, double lz, double link,
                     int min_group_size,
-                    std::int64_t* swift_group_ids_host,
+                    std::int64_t* group_ids_host,
                     std::uint64_t* out_num_groups,
                     std::uint64_t* out_grouped_particles,
                     std::uint64_t* out_largest_group,
@@ -26,10 +26,10 @@ int whole_fof_swift(const double* host, int count,
 
 // Slab-streamed single-GPU exact periodic FoF (for large snapshots up to ~1024^3 in limited VRAM).
 // Streams num_slabs x-cell slabs with +1 cell periodic halo through GPU FoF and merges via host Union-Find.
-int whole_fof_slabbed_swift(const double* host, std::uint64_t count,
+int whole_fof_slabbed(const double* host, std::uint64_t count,
                             double lx, double ly, double lz, double link,
                             int min_group_size, int num_slabs,
-                            std::int64_t* swift_group_ids_host,
+                            std::int64_t* group_ids_host,
                             std::uint64_t* out_num_groups,
                             std::uint64_t* out_grouped_particles,
                             std::uint64_t* out_largest_group,
@@ -49,7 +49,7 @@ struct FofHaloRow {
 // masses_or_null may be nullptr when particles share uniform_mass; vel_xyz may be nullptr to skip velocity stats.
 int compute_fof_catalog(const double* pos_xyz, const float* vel_xyz,
                         const float* masses_or_null, double uniform_mass,
-                        const std::int64_t* swift_group_ids,
+                        const std::int64_t* group_ids,
                         std::uint64_t count, std::uint64_t num_groups,
                         double lx, double ly, double lz,
                         FofHaloRow* out_halos);
@@ -73,13 +73,13 @@ int compute_fof_so(const double* pos_xyz, const float* masses_or_null,
                    int min_so_size, FofSoRow* out_so);
 
 // Device-resident single-GPU SWIFT FoF: operates directly on read-only device positions dev_pos_xyz
-// on the active CUDA device without H2D upload. Writes outputs to swift_group_ids_dev and/or
-// swift_group_ids_host (at least one must be non-null).
-int whole_fof_device_swift(const double* dev_pos_xyz, int count,
+// on the active CUDA device without H2D upload. Writes outputs to group_ids_dev and/or
+// group_ids_host (at least one must be non-null).
+int whole_fof_device(const double* dev_pos_xyz, int count,
                            double lx, double ly, double lz, double link,
                            int min_group_size,
-                           std::int64_t* swift_group_ids_dev,
-                           std::int64_t* swift_group_ids_host,
+                           std::int64_t* group_ids_dev,
+                           std::int64_t* group_ids_host,
                            std::uint64_t* out_num_groups,
                            std::uint64_t* out_grouped_particles,
                            std::uint64_t* out_largest_group,
@@ -89,14 +89,14 @@ int whole_fof_device_swift(const double* dev_pos_xyz, int count,
 // dev_pos_xyz[g] points to dev_counts[g] particles (3*doubles) on CUDA device dev_ids[g] (read-only).
 // Optional dev_orig_idx[g] maps local particles to global indices in [0, total_count); if nullptr or
 // dev_orig_idx[g] == nullptr, contiguous prefix slices are assumed.
-int whole_fof_multigpu_swift(int num_gpus, const int* dev_ids,
+int whole_fof_multigpu(int num_gpus, const int* dev_ids,
                              const double* const* dev_pos_xyz,
                              const std::uint32_t* const* dev_orig_idx,
                              const std::uint64_t* dev_counts,
                              std::uint64_t total_count,
                              double lx, double ly, double lz, double link,
                              int min_group_size,
-                             std::int64_t* swift_group_ids_host,
+                             std::int64_t* group_ids_host,
                              std::uint64_t* out_num_groups,
                              std::uint64_t* out_grouped_particles,
                              std::uint64_t* out_largest_group,

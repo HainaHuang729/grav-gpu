@@ -98,7 +98,7 @@ def make_fig1_architecture():
          CPU_FILL, CPU_EDGE)
     _box(ax, 0.268, 0.74, 0.46, 0.16,
          "Pinned-Host Cross-Bridge Staging (PCIe NODE Boundary)",
-         "SWIFT_P2P_MODE=nvlink: host-bounce ghost trees & migrants\nbetween GPU 1 (Slabs 3-5) <-> GPU 2 (Slabs 6-8) cleanly without deadlock",
+         "GRAV_P2P_MODE=nvlink: host-bounce ghost trees & migrants\nbetween GPU 1 (Slabs 3-5) <-> GPU 2 (Slabs 6-8) cleanly without deadlock",
          "#FFFBEB", "#B7791F")
     _box(ax, 0.762, 0.74, 0.214, 0.16,
          "Snapshot & FoF Pipeline",

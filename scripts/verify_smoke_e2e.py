@@ -34,7 +34,7 @@ class FofSoRow(ctypes.Structure):
 def main() -> int:
     if len(sys.argv) != 5:
         raise SystemExit(
-            f"Usage: {sys.argv[0]} <evolved.bin> <evolved.bin.fof.bin> <run.log> <swift_cuda_fof.so>"
+            f"Usage: {sys.argv[0]} <evolved.bin> <evolved.bin.fof.bin> <run.log> <grav_cuda_fof.so>"
         )
     out_bin, fof_bin, log_path, so_path = map(Path, sys.argv[1:5])
 

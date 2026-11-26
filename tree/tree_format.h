@@ -1,7 +1,7 @@
-#ifndef SWIFT_TREE_PROBE_FORMAT_H
-#define SWIFT_TREE_PROBE_FORMAT_H
+#ifndef GRAV_TREE_PROBE_FORMAT_H
+#define GRAV_TREE_PROBE_FORMAT_H
 #include <stdint.h>
-#include "swift_cuda_pm.h"
+#include "grav_cuda_pm.h"
 
 #define PROBE_TERMS 32
 #define PROBE_LEVELS 17
@@ -45,7 +45,7 @@ struct probe_header {
   double width[3], inv_width[3], box, smoothing;
 };
 struct probe_particle {
-  struct swift_pm_particle pm;
+  struct grav_pm_particle pm;
   float softening, old_acceleration;
 };
 struct probe_node {

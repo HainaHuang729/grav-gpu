@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone ctypes smoke & parity test for build/swift_cuda_fof.so (no external data needed)."""
+"""Standalone ctypes smoke & parity test for build/grav_cuda_fof.so (no external data needed)."""
 import ctypes
 import math
 import sys
@@ -31,30 +31,30 @@ class FofSoRow(ctypes.Structure):
 
 def main() -> int:
     if len(sys.argv) != 2:
-        raise SystemExit(f"Usage: {sys.argv[0]} <path/to/swift_cuda_fof.so>")
+        raise SystemExit(f"Usage: {sys.argv[0]} <path/to/grav_cuda_fof.so>")
     lib_path = Path(sys.argv[1])
     lib = ctypes.CDLL(str(lib_path))
 
     assert ctypes.sizeof(FofHaloRow) == 88
     assert ctypes.sizeof(FofSoRow) == 32
 
-    lib.whole_fof_swift.argtypes = [
+    lib.whole_fof_ranked.argtypes = [
         ctypes.POINTER(ctypes.c_double), ctypes.c_int,
         ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double,
         ctypes.c_int, ctypes.POINTER(ctypes.c_int64),
         ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64),
         ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_uint64),
     ]
-    lib.whole_fof_swift.restype = ctypes.c_int
+    lib.whole_fof_ranked.restype = ctypes.c_int
 
-    lib.whole_fof_slabbed_swift.argtypes = [
+    lib.whole_fof_slabbed.argtypes = [
         ctypes.POINTER(ctypes.c_double), ctypes.c_uint64,
         ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double,
         ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int64),
         ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64),
         ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_uint64),
     ]
-    lib.whole_fof_slabbed_swift.restype = ctypes.c_int
+    lib.whole_fof_slabbed.restype = ctypes.c_int
 
     lib.compute_fof_catalog.argtypes = [
         ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_float),
@@ -100,20 +100,20 @@ def main() -> int:
     ng1, gp1, lg1 = ctypes.c_uint64(), ctypes.c_uint64(), ctypes.c_uint64()
     ng2, gp2, lg2 = ctypes.c_uint64(), ctypes.c_uint64(), ctypes.c_uint64()
 
-    rc = lib.whole_fof_swift(
+    rc = lib.whole_fof_ranked(
         pos.ctypes.data_as(ctypes.POINTER(ctypes.c_double)), ctypes.c_int(n),
         box, box, box, link, 32, ids_ref.ctypes.data_as(ctypes.POINTER(ctypes.c_int64)),
         ctypes.byref(ng1), ctypes.byref(gp1), ctypes.byref(lg1), None, None)
-    assert rc == 0, f"whole_fof_swift failed: {rc}"
+    assert rc == 0, f"whole_fof_ranked failed: {rc}"
 
-    rc = lib.whole_fof_slabbed_swift(
+    rc = lib.whole_fof_slabbed(
         pos.ctypes.data_as(ctypes.POINTER(ctypes.c_double)), ctypes.c_uint64(n),
         box, box, box, link, 32, 4, ids_slab.ctypes.data_as(ctypes.POINTER(ctypes.c_int64)),
         ctypes.byref(ng2), ctypes.byref(gp2), ctypes.byref(lg2), None, None)
-    assert rc == 0, f"whole_fof_slabbed_swift failed: {rc}"
+    assert rc == 0, f"whole_fof_slabbed failed: {rc}"
     assert ng1.value == n_halos and ng2.value == ng1.value
     assert gp1.value == gp2.value and lg1.value == lg2.value
-    assert np.array_equal(ids_ref, ids_slab), "Mismatch between whole_fof_swift and whole_fof_slabbed_swift"
+    assert np.array_equal(ids_ref, ids_slab), "Mismatch between whole_fof_ranked and whole_fof_slabbed"
 
     m0 = 1.0
     rows = (FofHaloRow * ng1.value)()

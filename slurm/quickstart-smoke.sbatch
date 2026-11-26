@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=swift-treepm-smoke
+#SBATCH --job-name=grav-gpu-smoke
 #SBATCH --partition=a
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=8
@@ -9,7 +9,7 @@
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-$SLURM_SUBMIT_DIR}"
-SWIFT_BUILD_DIR="${SWIFT_BUILD_DIR:?Set SWIFT_BUILD_DIR to a GPU-configured upstream SWIFT source/build directory}"
+KERNEL_BUILD_DIR="${KERNEL_BUILD_DIR:?Set KERNEL_BUILD_DIR to a GPU-configured upstream SWIFT source/build directory}"
 CUDA_HOME="${CUDA_HOME:-$(dirname "$(dirname "$(command -v nvcc)")")}"
 CXX_BIN="${CXX_BIN:-g++}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -22,4 +22,4 @@ nvidia-smi -L
 
 make test-domain3d CXX="$CXX_BIN"
 make test-fof CUDA_HOME="$CUDA_HOME" CXX="$CXX_BIN" PYTHON="$PYTHON_BIN"
-make smoke SWIFT_BUILD_DIR="$SWIFT_BUILD_DIR" CUDA_HOME="$CUDA_HOME" CXX="$CXX_BIN" PYTHON="$PYTHON_BIN"
+make smoke KERNEL_BUILD_DIR="$KERNEL_BUILD_DIR" CUDA_HOME="$CUDA_HOME" CXX="$CXX_BIN" PYTHON="$PYTHON_BIN"

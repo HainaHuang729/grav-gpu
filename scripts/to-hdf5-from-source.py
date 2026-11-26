@@ -9,7 +9,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-SWIFT_FOF_NONE = 2147483647
+GRAV_FOF_NONE = 2147483647
 
 
 class FofHaloRow(ctypes.Structure):
@@ -218,7 +218,7 @@ def _write_fof_groups(out, orig_parts, n, box, a, fof_bin, fof_lib_path, endpoin
                     ds.attrs[k] = v
 
 
-def _set_swift_fof_attrs(ds, orig_parts):
+def _set_fof_attrs(ds, orig_parts):
     if "FOFGroupIDs" in orig_parts:
         ds.attrs.update(orig_parts["FOFGroupIDs"].attrs)
         return
@@ -237,7 +237,7 @@ def main():
     ap.add_argument("endpoint", type=Path, help="GPU binary snapshot (.bin)")
     ap.add_argument("output", type=Path, help="Output SWIFT HDF5 path")
     ap.add_argument("--fof-bin", type=Path, default=None, help="Optional GPU FoF binary (.fof.bin)")
-    ap.add_argument("--fof-lib", type=Path, default=None, help="Optional swift_cuda_fof.so to compute FOFGroups catalog")
+    ap.add_argument("--fof-lib", type=Path, default=None, help="Optional grav_cuda_fof.so to compute FOFGroups catalog")
     ap.add_argument("--so-min-size", type=int, default=20, help="Min FoF group size for SO (M200c/R200c/M200m/R200m); <0 disables")
     ap.add_argument("--h0", type=float, default=67.36)
     ap.add_argument("--omega-m", type=float, default=0.3153)
@@ -364,11 +364,11 @@ def main():
                 chunks=(8192,), shuffle=True,
                 compression="gzip", compression_opts=1,
             )
-            _set_swift_fof_attrs(fof_ds, orig_parts)
+            _set_fof_attrs(fof_ds, orig_parts)
             ngrp = int(fof_header[0])
             for start in range(0, n, chunk):
                 block = np.asarray(fof_data[start:start + chunk], dtype="<i8")
-                if not np.all((block == SWIFT_FOF_NONE) | ((block >= 1) & (block <= ngrp))):
+                if not np.all((block == GRAV_FOF_NONE) | ((block >= 1) & (block <= ngrp))):
                     raise ValueError(f"Invalid FOFGroupIDs entry at {start}")
                 fof_ds[start:start + len(block)] = block
             if args.fof_lib is not None:

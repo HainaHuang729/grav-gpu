@@ -1,9 +1,9 @@
 #pragma once
 
-#include "swift_cuda_fof.h"
-#include "swift_domain_3d.h"
+#include "grav_cuda_fof.h"
+#include "grav_domain_3d.h"
 
-namespace swift3d {
+namespace grav3d {
 
 template <class T>
 inline size_t dev_len(const DevPtr<T>& d) {
@@ -445,7 +445,7 @@ __global__ void __launch_bounds__(team, 4) eval_m2l_split_3d_kernel(
       const float r2m = norm2(dm);
       const float softm = fmaxf(meta.warp_soft, nm.max_softening);
       potential_derivatives_M2L deriv;
-      swift_cuda_potential_derivatives_compute_M2L(
+      grav_cuda_potential_derivatives_compute_M2L(
           dm.x, dm.y, dm.z, r2m, rsqrtf(r2m), softm, 1, inv_split, &deriv);
       gravity_M2L_apply_compact(&lf, st_cm + u, &deriv);
     }
@@ -1514,7 +1514,7 @@ inline int run_domain_3d_fof(const std::vector<Dom3DGpuCtx>& gpus,
   double fof_el[9]{};
   fof_ids.resize(N);
   if (cfg.requested_fof_slabs > 1 && !out_x.empty()) {
-    return whole_fof_slabbed_swift(
+    return whole_fof_slabbed(
         reinterpret_cast<const double*>(out_x.data()), N,
         box, box, box, fof_link, cfg.fof_min_size, cfg.requested_fof_slabs,
         fof_ids.data(), &ngrp, &ngrouped, &largest, fof_el, nullptr);
@@ -1530,7 +1530,7 @@ inline int run_domain_3d_fof(const std::vector<Dom3DGpuCtx>& gpus,
     dev_orig_ptrs[g] = gpus[g].d_orig_idx.p;
     dev_counts[g] = uint64_t(gpus[g].ns);
   }
-  return whole_fof_multigpu_swift(
+  return whole_fof_multigpu(
       ngpu, dev_ids.data(), dev_pos_ptrs.data(), dev_orig_ptrs.data(), dev_counts.data(),
       N, box, box, box, fof_link, cfg.fof_min_size,
       fof_ids.data(), &ngrp, &ngrouped, &largest, fof_el);
@@ -1621,7 +1621,7 @@ inline int run_domain_3d_evolution(
     fclose(fx); fclose(fv);
     if (fm) fclose(fm);
     if (fs) fclose(fs);
-    if (const char* unlink_env = std::getenv("SWIFT_UNLINK_INPUT_AFTER_LOAD")) {
+    if (const char* unlink_env = std::getenv("GRAV_UNLINK_INPUT_AFTER_LOAD")) {
       if (std::string(unlink_env) == "1") std::remove(cfg.input_path);
     }
   }
@@ -1764,7 +1764,7 @@ inline int run_domain_3d_evolution(
   check(cudaSetDevice(0));
   const double load_s = wall() - cfg.import_start;
 
-  SwiftDistPm dist_pm;
+  GravDistPm dist_pm;
   if (cfg.pm_dist_enabled) {
     std::vector<int> devs(num_gpus);
     std::vector<cudaStream_t> streams(num_gpus);
@@ -1933,7 +1933,7 @@ inline int run_domain_3d_evolution(
     lc_r_max = (cfg.lc_r_max_req > 0.0) ? cfg.lc_r_max_req
                                         : comoving_distance_mpc(h.initial_scale, cfg.lc_a_obs, p);
     lc_fp = fopen(cfg.lc_out_env, "wb");
-    if (!lc_fp) throw std::runtime_error(std::string("Cannot open SWIFT_LIGHTCONE_OUT: ") + cfg.lc_out_env);
+    if (!lc_fp) throw std::runtime_error(std::string("Cannot open GRAV_LIGHTCONE_OUT: ") + cfg.lc_out_env);
     const LightconeHeader blank_hdr{{'S','W','L','C','0','0','0','1'}, 0,
                                     {cfg.lc_obs.x, cfg.lc_obs.y, cfg.lc_obs.z},
                                     h.initial_scale, cfg.a_end, cfg.lc_a_obs, lc_r_max, h.box};
@@ -2691,13 +2691,13 @@ inline int run_domain_3d_evolution(
           } else {
             check(cudaMemsetAsync(G.d_pm_density.p, 0, pm_points * sizeof(double), G.compute_stream));
             if (G.ns > 0) {
-              swift_pm_cuda_deposit_buf(
+              grav_pm_cuda_deposit_buf(
                   G.d_x.p, mass_uniform ? nullptr : G.d_mass.p, first_mass,
                   G.ns, G.d_pm_density.p, pm_side, h.box, G.compute_stream);
             }
-            swift_pm_cuda_solve_on_device(G.d_pm_density.p, G.d_pm_field.p, pm_side, h.box, r_s, G.compute_stream);
+            grav_pm_cuda_solve_on_device(G.d_pm_density.p, G.d_pm_field.p, pm_side, h.box, r_s, G.compute_stream);
             if (G.ns > 0) {
-              swift_pm_cuda_interpolate_buf(
+              grav_pm_cuda_interpolate_buf(
                   G.d_x.p, G.ns, G.d_pm_field.p, pm_side, h.box, p.G, G.d_mesh_acc.p, nullptr, G.compute_stream);
             }
             check(cudaStreamSynchronize(G.compute_stream));
@@ -3253,7 +3253,7 @@ inline int run_domain_3d_evolution(
                 if (cfg.pm_dist_enabled) {
                   dist_pm.interpolate(g, G.d_x.p, size_t(ns), h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p);
                 } else {
-                  swift_pm_cuda_interpolate_buf(
+                  grav_pm_cuda_interpolate_buf(
                       G.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
                       G.d_mesh_acc.p, G.d_pm_pot.p, G.compute_stream);
                 }
@@ -3320,7 +3320,7 @@ inline int run_domain_3d_evolution(
               if (cfg.pm_dist_enabled) {
                 dist_pm.interpolate(g, G.d_x.p, size_t(ns), h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p);
               } else {
-                swift_pm_cuda_interpolate_buf(
+                grav_pm_cuda_interpolate_buf(
                     G.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
                     G.d_mesh_acc.p, G.d_pm_pot.p, G.compute_stream);
               }
@@ -3547,13 +3547,13 @@ inline int run_domain_3d_evolution(
 
       if (midpoint && !midpoint_written) {
         FILE* out = fopen(cfg.midpoint_path, "wb");
-        if (!out) throw std::runtime_error("Cannot open SWIFT_RESTART_MIDPOINT_OUT");
+        if (!out) throw std::runtime_error("Cannot open GRAV_RESTART_MIDPOINT_OUT");
         const Footer footer{N, h.box, a};
         write_bin(out, &footer, 1);
         write_bin(out, out_x.data(), N);
         write_bin(out, out_v.data(), N);
         write_bin(out, out_pot.data(), N);
-        if (fclose(out)) throw std::runtime_error("Failed closing SWIFT_RESTART_MIDPOINT_OUT");
+        if (fclose(out)) throw std::runtime_error("Failed closing GRAV_RESTART_MIDPOINT_OUT");
         midpoint_written = true;
       }
 
@@ -3623,23 +3623,23 @@ inline int run_domain_3d_evolution(
   join_snap_writer();
   if (cfg.force0_out_path) {
     FILE* fp = fopen(cfg.force0_out_path, "wb");
-    if (!fp) throw std::runtime_error("Could not open SWIFT_FORCE0_OUT output");
+    if (!fp) throw std::runtime_error("Could not open GRAV_FORCE0_OUT output");
     write_bin(fp, out_force0_f4.data(), out_force0_f4.size());
-    if (fclose(fp)) throw std::runtime_error("Could not close SWIFT_FORCE0_OUT");
+    if (fclose(fp)) throw std::runtime_error("Could not close GRAV_FORCE0_OUT");
   }
   if (cfg.force_comp_path) {
     FILE* fp = fopen(cfg.force_comp_path, "wb");
-    if (!fp) throw std::runtime_error("Could not open SWIFT_FORCE_COMPONENTS output");
+    if (!fp) throw std::runtime_error("Could not open GRAV_FORCE_COMPONENTS output");
     write_bin(fp, out_short_f4.data(), out_short_f4.size());
     write_bin(fp, out_long_f4.data(), out_long_f4.size());
-    if (fclose(fp)) throw std::runtime_error("Could not close SWIFT_FORCE_COMPONENTS");
+    if (fclose(fp)) throw std::runtime_error("Could not close GRAV_FORCE_COMPONENTS");
   }
   if (cfg.force3_out_path) {
     FILE* fp = fopen(cfg.force3_out_path, "wb");
-    if (!fp) throw std::runtime_error("Could not open SWIFT_FORCE3_OUT output");
+    if (!fp) throw std::runtime_error("Could not open GRAV_FORCE3_OUT output");
     write_bin(fp, out_short_f3.data(), out_short_f3.size());
     write_bin(fp, out_long_f3.data(), out_long_f3.size());
-    if (fclose(fp)) throw std::runtime_error("Could not close SWIFT_FORCE3_OUT");
+    if (fclose(fp)) throw std::runtime_error("Could not close GRAV_FORCE3_OUT");
   }
 
   const double start_output = wall();
@@ -3745,4 +3745,4 @@ inline int run_domain_3d_evolution(
   return 0;
 }
 
-} // namespace swift3d
+} // namespace grav3d

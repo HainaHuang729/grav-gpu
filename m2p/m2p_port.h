@@ -1,5 +1,5 @@
-#ifndef SWIFT_CUDA_M2P_PORT_H
-#define SWIFT_CUDA_M2P_PORT_H
+#ifndef GRAV_CUDA_M2P_PORT_H
+#define GRAV_CUDA_M2P_PORT_H
 #include "gpu_mapping.h"
 #include "multipole_struct.h"
 

@@ -21,11 +21,11 @@
 
 #include "validated_device_tree.cuh"
 #include "gpu_gravity_functions.cuh"
-#ifdef SWIFT_FAST_M2P_EXP
+#ifdef GRAV_FAST_M2P_EXP
 #define expf __expf
 #endif
 #include "m2p_native_math.cuh"
-#ifdef SWIFT_FAST_M2P_EXP
+#ifdef GRAV_FAST_M2P_EXP
 #undef expf
 #endif
 #undef min
@@ -303,7 +303,7 @@ __global__ void __launch_bounds__(team, 4) tree_force_warp_slab(
               rad2 < r2 && 8.f * source.m.power[2] < p.mac_tolerance * old * r2 * r2);
           if (accept) {
             reduced_grav_tensor contribution{};
-            swift_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 1, inv_split, &contribution);
+            grav_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 1, inv_split, &contribution);
             result.x += contribution.F_100; result.y += contribution.F_010;
             result.z += contribution.F_001; result.w += contribution.F_000;
             node = st.escape[node];
@@ -388,9 +388,9 @@ __global__ void __launch_bounds__(team, 4) tree_force_warp_slab(
       const float r2m = norm2(dm);
       const float softm = fmaxf(warp_soft, src.m.max_softening);
       potential_derivatives_M2L deriv;
-      swift_cuda_potential_derivatives_compute_M2L(
+      grav_cuda_potential_derivatives_compute_M2L(
           dm.x, dm.y, dm.z, r2m, rsqrtf(r2m), softm, 1, inv_split, &deriv);
-      swift_cuda_gravity_M2L_apply(&lf, &src.m, &deriv);
+      grav_cuda_gravity_M2L_apply(&lf, &src.m, &deriv);
     }
     float* lfp = reinterpret_cast<float*>(&lf);
     float* sfp = reinterpret_cast<float*>(&s_field[warp_id]);
@@ -473,7 +473,7 @@ __global__ void __launch_bounds__(team, 4) tree_force_warp_slab(
             rad2 < r2 && 8.f * source.m.power[2] < p.mac_tolerance * old * r2 * r2);
         if (accept) {
           reduced_grav_tensor contribution{};
-          swift_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 1, inv_split, &contribution);
+          grav_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 1, inv_split, &contribution);
           result.x += contribution.F_100; result.y += contribution.F_010;
           result.z += contribution.F_001; result.w += contribution.F_000;
         }
@@ -830,33 +830,33 @@ int main(int argc, char** argv) {
     const double a_end = std::stod(argv[3]);
     if (!(a_end > h.initial_scale)) return 3;
 
-    const bool dynamic_pm = std::getenv("SWIFT_DYNAMIC_PM") != nullptr;
-    const char* requested_pm = std::getenv("SWIFT_PM_INTERVALS");
+    const bool dynamic_pm = std::getenv("GRAV_DYNAMIC_PM") != nullptr;
+    const char* requested_pm = std::getenv("GRAV_PM_INTERVALS");
     const int pm_intervals = requested_pm ? std::stoi(requested_pm) : (dynamic_pm ? 16 : 1);
     if (pm_intervals <= 0 || pm_intervals > 4096 || (pm_intervals & (pm_intervals - 1)))
-      throw std::runtime_error("SWIFT_PM_INTERVALS must be a power of two between 1 and 4096");
-    const char* requested_short = std::getenv("SWIFT_SHORT_CAP_INTERVALS");
+      throw std::runtime_error("GRAV_PM_INTERVALS must be a power of two between 1 and 4096");
+    const char* requested_short = std::getenv("GRAV_SHORT_CAP_INTERVALS");
     const int short_intervals = requested_short ? std::stoi(requested_short) : pm_intervals;
     if (short_intervals < pm_intervals || short_intervals > 4096 ||
         (short_intervals & (short_intervals - 1)))
-      throw std::runtime_error("Invalid SWIFT_SHORT_CAP_INTERVALS");
+      throw std::runtime_error("Invalid GRAV_SHORT_CAP_INTERVALS");
 
-    const char* requested_step = std::getenv("SWIFT_SHORT_STEP_FACTOR");
-    const char* requested_mac = std::getenv("SWIFT_MAC_TOLERANCE");
-    const char* requested_g = std::getenv("SWIFT_GRAV_G");
-    const char* requested_dt_max = std::getenv("SWIFT_DT_MAX");
-    const char* requested_rms_fac = std::getenv("SWIFT_MAX_DT_RMS_FACTOR");
-    const char* leaf_override = std::getenv("SWIFT_LEAF_LIMIT");
-    const char* m2l_env = std::getenv("SWIFT_WARP_M2L");
-    const char* fsplit_env = std::getenv("SWIFT_FAST_SPLIT");
-    const char* skip_out_env = std::getenv("SWIFT_SKIP_OUTPUT_WRITE");
-    const char* force_comp_path = std::getenv("SWIFT_FORCE_COMPONENTS");
-    const char* slab_axis_env = std::getenv("SWIFT_SLAB_AXIS");
+    const char* requested_step = std::getenv("GRAV_SHORT_STEP_FACTOR");
+    const char* requested_mac = std::getenv("GRAV_MAC_TOLERANCE");
+    const char* requested_g = std::getenv("GRAV_G");
+    const char* requested_dt_max = std::getenv("GRAV_DT_MAX");
+    const char* requested_rms_fac = std::getenv("GRAV_MAX_DT_RMS_FACTOR");
+    const char* leaf_override = std::getenv("GRAV_LEAF_LIMIT");
+    const char* m2l_env = std::getenv("GRAV_WARP_M2L");
+    const char* fsplit_env = std::getenv("GRAV_FAST_SPLIT");
+    const char* skip_out_env = std::getenv("GRAV_SKIP_OUTPUT_WRITE");
+    const char* force_comp_path = std::getenv("GRAV_FORCE_COMPONENTS");
+    const char* slab_axis_env = std::getenv("GRAV_SLAB_AXIS");
     int requested_axis = -1;
     if (slab_axis_env && std::string(slab_axis_env) != "auto") {
       requested_axis = std::stoi(slab_axis_env);
       if (requested_axis < 0 || requested_axis > 2)
-        throw std::runtime_error("SWIFT_SLAB_AXIS must be auto, 0, 1, or 2");
+        throw std::runtime_error("GRAV_SLAB_AXIS must be auto, 0, 1, or 2");
     }
 
     const float step_factor = requested_step ? std::stof(requested_step) : 1.f;
@@ -977,7 +977,7 @@ int main(int argc, char** argv) {
     fclose(fm);
     fclose(input);
     { std::vector<double3>().swap(rx); std::vector<float3>().swap(rv); std::vector<float>().swap(rm); }
-    const char* unlink_env = std::getenv("SWIFT_UNLINK_INPUT_AFTER_LOAD");
+    const char* unlink_env = std::getenv("GRAV_UNLINK_INPUT_AFTER_LOAD");
     if (unlink_env && std::string(unlink_env) == "1") {
       std::remove(argv[1]);
     }
@@ -1105,7 +1105,7 @@ int main(int argc, char** argv) {
     ensure_slab_cap(max_slab_n);
 
     // Initialize PM buffers upfront so MEMORY_PLAN includes PM VRAM.
-    swift_pm_cuda_begin(128, stream);
+    grav_pm_cuda_begin(128, stream);
     check(cudaStreamSynchronize(stream));
     size_t free_vram = 0, total_vram = 0;
     check(cudaMemGetInfo(&free_vram, &total_vram));
@@ -1438,7 +1438,7 @@ int main(int argc, char** argv) {
         }
 
         const double t_pm0 = wall();
-        swift_pm_cuda_begin(128, stream);
+        grav_pm_cuda_begin(128, stream);
         for (int s = 0; s < num_slabs; ++s) {
           const auto& S = slabs[s];
           const size_t ns = S.x.size();
@@ -1446,10 +1446,10 @@ int main(int argc, char** argv) {
           stager.upload(d_x.p, S.x.data(), ns * sizeof(double3), stream);
           if (!mass_uniform)
             stager.upload(d_mass.p, S.mass.data(), ns * sizeof(float), stream);
-          swift_pm_cuda_deposit_double3(
+          grav_pm_cuda_deposit_double3(
               d_x.p, mass_uniform ? nullptr : d_mass.p, first_mass, ns, 128, h.box, stream);
         }
-        swift_pm_cuda_solve(128, h.box, r_s, stream);
+        grav_pm_cuda_solve(128, h.box, r_s, stream);
         check(cudaStreamSynchronize(stream));
         pm_ms = (wall() - t_pm0) * 1000.0;
       }
@@ -1557,7 +1557,7 @@ int main(int argc, char** argv) {
           if (is_pm_step) {
             const double t_interp = wall();
             float* pot_ptr = (is_final && (d_pm_pot != nullptr)) ? d_pm_pot : nullptr;
-            swift_pm_cuda_interpolate_double3(
+            grav_pm_cuda_interpolate_double3(
                 d_x.p, size_t(ns), 128, h.box, p.G, d_mesh_acc, pot_ptr, stream);
             check(cudaStreamSynchronize(stream));
             pm_ms += (wall() - t_interp) * 1000.0;
@@ -1734,10 +1734,10 @@ int main(int argc, char** argv) {
 
     if (force_comp_path) {
       FILE* fp = fopen(force_comp_path, "wb");
-      if (!fp) throw std::runtime_error("Could not open SWIFT_FORCE_COMPONENTS output");
+      if (!fp) throw std::runtime_error("Could not open GRAV_FORCE_COMPONENTS output");
       write_bin(fp, out_short_f.data(), out_short_f.size());
       write_bin(fp, out_long_f.data(), out_long_f.size());
-      if (fclose(fp)) throw std::runtime_error("Could not close SWIFT_FORCE_COMPONENTS");
+      if (fclose(fp)) throw std::runtime_error("Could not close GRAV_FORCE_COMPONENTS");
     }
 
     const double start_output = wall();

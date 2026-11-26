@@ -17,7 +17,7 @@ functions=[
     ("gravity_derivatives.h",["potential_derivatives_compute_M2P"]),
     ("multipole.h",["gravity_M2P"]),
 ]
-grouped=os.getenv("SWIFT_GROUP_M2L")=="1"
+grouped=os.getenv("GRAV_GROUP_M2L")=="1"
 if grouped:
     functions[-2][1].append("potential_derivatives_compute_M2L")
     functions[-1][1].append("gravity_M2L_apply")
@@ -34,7 +34,7 @@ def extract(source,name):
         i+=1
     body=source[m.start():i]
     body=re.sub(r"__attribute__\(\([^\n]+\)\) INLINE static","static __device__ __forceinline__",body,count=1)
-    return re.sub(r"\b("+"|".join(names)+r")\b",lambda m:"swift_cuda_"+m[0],body)
+    return re.sub(r"\b("+"|".join(names)+r")\b",lambda m:"grav_cuda_"+m[0],body)
 
 pieces=[]
 for filename,group in functions:
@@ -47,7 +47,7 @@ for filename,group in functions:
     "#error Disable native debug counters for this experimental device backend.\n#endif\n"
     +"\n\n".join(pieces)+"\n")
 
-if os.getenv("SWIFT_M2P_MATH_ONLY")=="1":
+if os.getenv("GRAV_M2P_MATH_ONLY")=="1":
     raise SystemExit(0)
 
 def replace(s,old,new):
@@ -166,7 +166,7 @@ def runner(s):
         stream);''','''        work_i, work_j,
         m2p, stream);''')
     s=replace(s,'''    const size_t active_recv_bytes =
-''','''    const char *m2p_mode=getenv("SWIFT_BENCH_DEVICE_M2P");
+''','''    const char *m2p_mode=getenv("GRAV_BENCH_DEVICE_M2P");
     substream->m2p_enabled=m2p_mode && strcmp(m2p_mode,"1")==0;
     if (substream->m2p_enabled) {
       if (!substream->pair_direct_pack || !gpu->pair_compact_blocks || gpu->pair_pipeline)

@@ -1,4 +1,4 @@
-#include "swift_cuda_fof.h"
+#include "grav_cuda_fof.h"
 
 #include <cub/cub.cuh>
 #include <cuda/atomic>
@@ -20,7 +20,7 @@
 #include <omp.h>
 #endif
 
-namespace swift_fof {
+namespace grav_fof {
 
 using Key = std::uint64_t;
 using Atomic = cuda::atomic_ref<int, cuda::thread_scope_device>;
@@ -28,7 +28,7 @@ using Atomic = cuda::atomic_ref<int, cuda::thread_scope_device>;
 constexpr int threads = 256;
 constexpr int max_grid_blocks = 65535;
 constexpr int heavy_cell_threshold = 64;
-constexpr std::int64_t swift_fof_none = 2147483647LL;
+constexpr std::int64_t grav_fof_none = 2147483647LL;
 
 struct GpuError {
   cudaError_t status;
@@ -747,31 +747,31 @@ __global__ void gather_root_sizes(const int* valid_roots, const int* root_counts
   }
 }
 
-__global__ void fill_swift_sentinel(std::int64_t* root_to_swift, int n) {
+__global__ void fill_fof_sentinel(std::int64_t* root_to_ranked, int n) {
   const int stride = gridDim.x * blockDim.x;
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride) {
-    root_to_swift[i] = swift_fof_none;
+    root_to_ranked[i] = grav_fof_none;
   }
 }
 
-__global__ void assign_swift_ids(const int* sorted_valid_roots, std::int64_t* root_to_swift,
+__global__ void assign_ranked_ids(const int* sorted_valid_roots, std::int64_t* root_to_ranked,
                                  int num_groups) {
   const int stride = gridDim.x * blockDim.x;
   for (int rank = blockIdx.x * blockDim.x + threadIdx.x; rank < num_groups; rank += stride) {
-    root_to_swift[sorted_valid_roots[rank]] = static_cast<std::int64_t>(rank) + 1LL;
+    root_to_ranked[sorted_valid_roots[rank]] = static_cast<std::int64_t>(rank) + 1LL;
   }
 }
 
-__global__ void scatter_swift_labels(const int* sorted_roots, const int* rows,
+__global__ void scatter_ranked_labels(const int* sorted_roots, const int* rows,
                                      const std::uint32_t* dev_orig_idx,
                                      std::uint32_t gid_offset,
-                                     const std::int64_t* root_to_swift,
-                                     std::int64_t* swift_labels, int n) {
+                                     const std::int64_t* root_to_ranked,
+                                     std::int64_t* ranked_labels, int n) {
   const int stride = gridDim.x * blockDim.x;
   for (int k = blockIdx.x * blockDim.x + threadIdx.x; k < n; k += stride) {
     const std::uint32_t out_i = dev_orig_idx ? dev_orig_idx[rows[k]]
                                              : (gid_offset + static_cast<std::uint32_t>(rows[k]));
-    swift_labels[out_i] = root_to_swift[sorted_roots[k]];
+    ranked_labels[out_i] = root_to_ranked[sorted_roots[k]];
   }
 }
 
@@ -891,7 +891,7 @@ inline int grid_for_u64(std::uint64_t n) {
 
 enum class OutMode {
   RawHost,
-  Swift,
+  Ranked,
   DeviceMerge,
 };
 
@@ -900,7 +900,7 @@ int run_fof_core_impl(const double* pos_ptr, bool pos_is_device, bool allow_in_p
                       OutMode mode, int min_group_size,
                       const std::uint32_t* dev_orig_idx, std::uint32_t gid_offset,
                       int* raw_labels_host,
-                      std::int64_t* swift_labels_dev, std::int64_t* swift_labels_host,
+                      std::int64_t* ranked_labels_dev, std::int64_t* ranked_labels_host,
                       std::uint64_t* out_num_groups,
                       std::uint64_t* out_grouped_particles,
                       std::uint64_t* out_largest_group,
@@ -913,10 +913,10 @@ int run_fof_core_impl(const double* pos_ptr, bool pos_is_device, bool allow_in_p
         lx <= 0.0 || ly <= 0.0 || lz <= 0.0) {
       throw GpuError{cudaErrorInvalidValue};
     }
-    if (mode == OutMode::Swift && min_group_size < 2) {
+    if (mode == OutMode::Ranked && min_group_size < 2) {
       throw GpuError{cudaErrorInvalidValue};
     }
-    if (mode == OutMode::Swift && !swift_labels_dev && !swift_labels_host) {
+    if (mode == OutMode::Ranked && !ranked_labels_dev && !ranked_labels_host) {
       throw GpuError{cudaErrorInvalidValue};
     }
     if (mode == OutMode::RawHost && !raw_labels_host) {
@@ -1178,7 +1178,7 @@ int run_fof_core_impl(const double* pos_ptr, bool pos_is_device, bool allow_in_p
       return 0;
     }
 
-    step = "swift relabel";
+    step = "ranked relabel";
     Buffer<int> root_counts(static_cast<std::size_t>(count));
     check(cudaMemset(root_counts.ptr, 0, static_cast<std::size_t>(count) * sizeof(int)));
     count_root_sizes<<<grid_for(count), threads>>>(sorted_roots.ptr, root_counts.ptr, count);
@@ -1201,8 +1201,8 @@ int run_fof_core_impl(const double* pos_ptr, bool pos_is_device, bool allow_in_p
 
     std::uint64_t grouped_total = 0;
     std::uint64_t largest_sz = 0;
-    Buffer<std::int64_t> root_to_swift(static_cast<std::size_t>(count));
-    fill_swift_sentinel<<<grid_for(count), threads>>>(root_to_swift.ptr, count);
+    Buffer<std::int64_t> root_to_ranked(static_cast<std::size_t>(count));
+    fill_fof_sentinel<<<grid_for(count), threads>>>(root_to_ranked.ptr, count);
 
     if (num_groups > 0) {
       Buffer<int> valid_sizes(static_cast<std::size_t>(num_groups));
@@ -1258,32 +1258,32 @@ int run_fof_core_impl(const double* pos_ptr, bool pos_is_device, bool allow_in_p
       check(cudaMemcpy(&grouped_i64, sum_dev.ptr, sizeof(std::int64_t), cudaMemcpyDeviceToHost));
       grouped_total = static_cast<std::uint64_t>(grouped_i64);
 
-      assign_swift_ids<<<grid_for(num_groups), threads>>>(
-          sorted_valid_roots.ptr, root_to_swift.ptr, num_groups);
+      assign_ranked_ids<<<grid_for(num_groups), threads>>>(
+          sorted_valid_roots.ptr, root_to_ranked.ptr, num_groups);
     } else {
       root_counts.release();
       valid_roots.release();
     }
 
-    Buffer<std::int64_t> swift_out_buf;
-    std::int64_t* out_dev = swift_labels_dev;
+    Buffer<std::int64_t> ranked_out_buf;
+    std::int64_t* out_dev = ranked_labels_dev;
     if (!out_dev) {
-      swift_out_buf = Buffer<std::int64_t>(static_cast<std::size_t>(count));
-      out_dev = swift_out_buf.ptr;
+      ranked_out_buf = Buffer<std::int64_t>(static_cast<std::size_t>(count));
+      out_dev = ranked_out_buf.ptr;
     }
-    scatter_swift_labels<<<grid_for(count), threads>>>(
+    scatter_ranked_labels<<<grid_for(count), threads>>>(
         sorted_roots.ptr, rows.Current(), dev_orig_idx, gid_offset,
-        root_to_swift.ptr, out_dev, count);
+        root_to_ranked.ptr, out_dev, count);
     check(cudaDeviceSynchronize());
-    root_to_swift.release();
+    root_to_ranked.release();
     sorted_roots.release();
     row_a.release();
     row_b.release();
 
     step = "download";
-    if (swift_labels_host) {
+    if (ranked_labels_host) {
       timer.start();
-      check(cudaMemcpy(swift_labels_host, out_dev,
+      check(cudaMemcpy(ranked_labels_host, out_dev,
                        static_cast<std::size_t>(count) * sizeof(std::int64_t),
                        cudaMemcpyDeviceToHost));
       timer.stop(el + 8);
@@ -1296,23 +1296,23 @@ int run_fof_core_impl(const double* pos_ptr, bool pos_is_device, bool allow_in_p
     if (out_largest_group) *out_largest_group = largest_sz;
     return 0;
   } catch (const GpuError& error) {
-    std::fprintf(stderr, "SWIFT_FOF_CUDA_ERROR %s %s\n", step, cudaGetErrorString(error.status));
+    std::fprintf(stderr, "GRAV_FOF_CUDA_ERROR %s %s\n", step, cudaGetErrorString(error.status));
     return int(error.status);
   }
 }
 
 int run_fof_core(const double* host, int count,
                  double lx, double ly, double lz, double link,
-                 bool swift_mode, int min_group_size,
-                 int* raw_labels_host, std::int64_t* swift_labels_host,
+                 bool ranked_mode, int min_group_size,
+                 int* raw_labels_host, std::int64_t* ranked_labels_host,
                  std::uint64_t* out_num_groups,
                  std::uint64_t* out_grouped_particles,
                  std::uint64_t* out_largest_group,
                  double* elapsed, std::uint64_t* info) {
   return run_fof_core_impl(
       host, false, false, count, lx, ly, lz, link,
-      swift_mode ? OutMode::Swift : OutMode::RawHost, min_group_size,
-      nullptr, 0U, raw_labels_host, nullptr, swift_labels_host,
+      ranked_mode ? OutMode::Ranked : OutMode::RawHost, min_group_size,
+      nullptr, 0U, raw_labels_host, nullptr, ranked_labels_host,
       out_num_groups, out_grouped_particles, out_largest_group,
       nullptr, nullptr, nullptr, elapsed, info);
 }
@@ -1419,37 +1419,37 @@ __global__ void collect_valid_roots_u32_kernel(const std::uint32_t* parent,
   }
 }
 
-__global__ void fill_swift_sentinel_i32_kernel(std::int32_t* root_to_swift, std::uint64_t n) {
+__global__ void fill_fof_sentinel_i32_kernel(std::int32_t* root_to_ranked, std::uint64_t n) {
   const std::uint64_t stride = std::uint64_t(gridDim.x) * std::uint64_t(blockDim.x);
-  const std::int32_t none_val = static_cast<std::int32_t>(swift_fof_none);
+  const std::int32_t none_val = static_cast<std::int32_t>(grav_fof_none);
   for (std::uint64_t i = std::uint64_t(blockIdx.x) * std::uint64_t(blockDim.x) + threadIdx.x;
        i < n; i += stride) {
-    root_to_swift[i] = none_val;
+    root_to_ranked[i] = none_val;
   }
 }
 
-__global__ void assign_swift_ids_i32_kernel(const std::uint32_t* sorted_valid_roots,
-                                            std::int32_t* root_to_swift, int num_groups) {
+__global__ void assign_ranked_ids_i32_kernel(const std::uint32_t* sorted_valid_roots,
+                                            std::int32_t* root_to_ranked, int num_groups) {
   const int stride = gridDim.x * blockDim.x;
   for (int rank = blockIdx.x * blockDim.x + threadIdx.x; rank < num_groups; rank += stride) {
-    root_to_swift[sorted_valid_roots[rank]] = rank + 1;
+    root_to_ranked[sorted_valid_roots[rank]] = rank + 1;
   }
 }
 
-__global__ void scatter_swift_chunk_u32_kernel(const std::uint32_t* parent,
-                                               const std::int32_t* root_to_swift,
+__global__ void scatter_ranked_chunk_u32_kernel(const std::uint32_t* parent,
+                                               const std::int32_t* root_to_ranked,
                                                std::int64_t* chunk_out,
                                                std::uint64_t base, std::uint64_t len) {
   const std::uint64_t stride = std::uint64_t(gridDim.x) * std::uint64_t(blockDim.x);
   for (std::uint64_t j = std::uint64_t(blockIdx.x) * std::uint64_t(blockDim.x) + threadIdx.x;
        j < len; j += stride) {
-    chunk_out[j] = static_cast<std::int64_t>(root_to_swift[parent[base + j]]);
+    chunk_out[j] = static_cast<std::int64_t>(root_to_ranked[parent[base + j]]);
   }
 }
 
-void finalize_and_relabel_swift_u32_gpu(std::uint32_t* d_parent, std::uint64_t count,
+void finalize_and_relabel_ranked_u32_gpu(std::uint32_t* d_parent, std::uint64_t count,
                                         int min_group_size,
-                                        std::int64_t* swift_group_ids_host,
+                                        std::int64_t* group_ids_host,
                                         std::uint64_t* out_num_groups,
                                         std::uint64_t* out_grouped_particles,
                                         std::uint64_t* out_largest_group,
@@ -1524,11 +1524,11 @@ void finalize_and_relabel_swift_u32_gpu(std::uint32_t* d_parent, std::uint64_t c
   }
 
   // Reuse d_root_counts storage (4B/entry) as int32_t root -> SWIFT group ID table
-  std::int32_t* d_root_to_swift = reinterpret_cast<std::int32_t*>(d_root_counts.ptr);
-  fill_swift_sentinel_i32_kernel<<<grid_for_u64(count), threads>>>(d_root_to_swift, count);
+  std::int32_t* d_root_to_ranked = reinterpret_cast<std::int32_t*>(d_root_counts.ptr);
+  fill_fof_sentinel_i32_kernel<<<grid_for_u64(count), threads>>>(d_root_to_ranked, count);
   if (num_groups > 0) {
-    assign_swift_ids_i32_kernel<<<grid_for(num_groups), threads>>>(
-        d_sorted_roots.ptr, d_root_to_swift, num_groups);
+    assign_ranked_ids_i32_kernel<<<grid_for(num_groups), threads>>>(
+        d_sorted_roots.ptr, d_root_to_ranked, num_groups);
     d_sorted_roots.release();
   }
   check(cudaGetLastError());
@@ -1538,11 +1538,11 @@ void finalize_and_relabel_swift_u32_gpu(std::uint32_t* d_parent, std::uint64_t c
   double dl_acc = 0.0;
   for (std::uint64_t base = 0; base < count; base += chunk_len) {
     const std::uint64_t cur = std::min<std::uint64_t>(chunk_len, count - base);
-    scatter_swift_chunk_u32_kernel<<<grid_for_u64(cur), threads>>>(
-        d_parent, d_root_to_swift, d_chunk_out.ptr, base, cur);
+    scatter_ranked_chunk_u32_kernel<<<grid_for_u64(cur), threads>>>(
+        d_parent, d_root_to_ranked, d_chunk_out.ptr, base, cur);
     double dt = 0.0;
     timer.start();
-    check(cudaMemcpy(swift_group_ids_host + base, d_chunk_out.ptr,
+    check(cudaMemcpy(group_ids_host + base, d_chunk_out.ptr,
                      static_cast<std::size_t>(cur) * sizeof(std::int64_t),
                      cudaMemcpyDeviceToHost));
     timer.stop(&dt);
@@ -1880,48 +1880,48 @@ int run_device_slabbed_merge_u32(const double3* d_pos, std::uint64_t count,
   return 0;
 }
 
-}  // namespace swift_fof
+}  // namespace grav_fof
 
 extern "C" int whole_fof(const double* host, int count,
                          double lx, double ly, double lz, double link,
                          int* labels_host, double* elapsed, std::uint64_t* info) {
-  return swift_fof::run_fof_core_impl(
+  return grav_fof::run_fof_core_impl(
       host, false, false, count, lx, ly, lz, link,
-      swift_fof::OutMode::RawHost, 2, nullptr, 0U,
+      grav_fof::OutMode::RawHost, 2, nullptr, 0U,
       labels_host, nullptr, nullptr,
       nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr, elapsed, info);
 }
 
-extern "C" int whole_fof_swift(const double* host, int count,
+extern "C" int whole_fof_ranked(const double* host, int count,
                                double lx, double ly, double lz, double link,
                                int min_group_size,
-                               std::int64_t* swift_group_ids_host,
+                               std::int64_t* group_ids_host,
                                std::uint64_t* out_num_groups,
                                std::uint64_t* out_grouped_particles,
                                std::uint64_t* out_largest_group,
                                double* elapsed, std::uint64_t* info) {
-  return swift_fof::run_fof_core_impl(
+  return grav_fof::run_fof_core_impl(
       host, false, false, count, lx, ly, lz, link,
-      swift_fof::OutMode::Swift, min_group_size, nullptr, 0U,
-      nullptr, nullptr, swift_group_ids_host,
+      grav_fof::OutMode::Ranked, min_group_size, nullptr, 0U,
+      nullptr, nullptr, group_ids_host,
       out_num_groups, out_grouped_particles, out_largest_group,
       nullptr, nullptr, nullptr, elapsed, info);
 }
 
-extern "C" int whole_fof_device_swift(const double* dev_pos_xyz, int count,
+extern "C" int whole_fof_device(const double* dev_pos_xyz, int count,
                                       double lx, double ly, double lz, double link,
                                       int min_group_size,
-                                      std::int64_t* swift_group_ids_dev,
-                                      std::int64_t* swift_group_ids_host,
+                                      std::int64_t* group_ids_dev,
+                                      std::int64_t* group_ids_host,
                                       std::uint64_t* out_num_groups,
                                       std::uint64_t* out_grouped_particles,
                                       std::uint64_t* out_largest_group,
                                       double* elapsed, std::uint64_t* info) {
-  return swift_fof::run_fof_core_impl(
+  return grav_fof::run_fof_core_impl(
       dev_pos_xyz, true, false, count, lx, ly, lz, link,
-      swift_fof::OutMode::Swift, min_group_size, nullptr, 0U,
-      nullptr, swift_group_ids_dev, swift_group_ids_host,
+      grav_fof::OutMode::Ranked, min_group_size, nullptr, 0U,
+      nullptr, group_ids_dev, group_ids_host,
       out_num_groups, out_grouped_particles, out_largest_group,
       nullptr, nullptr, nullptr, elapsed, info);
 }
@@ -1974,7 +1974,7 @@ inline void host_union(std::vector<std::uint32_t>& parent,
 int whole_fof_slabbed_host_fallback(const double* host, std::uint64_t count,
                                     double lx, double ly, double lz, double link,
                                     int min_group_size, int S, int nx,
-                                    std::int64_t* swift_group_ids_host,
+                                    std::int64_t* group_ids_host,
                                     std::uint64_t* out_num_groups,
                                     std::uint64_t* out_grouped_particles,
                                     std::uint64_t* out_largest_group,
@@ -2048,7 +2048,7 @@ int whole_fof_slabbed_host_fallback(const double* host, std::uint64_t count,
     }
 
     double slab_el[9]{};
-    const int st = swift_fof::run_fof_core(
+    const int st = grav_fof::run_fof_core(
         slab_pos.data(), int(m_s), lx, ly, lz, link,
         false, 2, local_roots.data(), nullptr,
         nullptr, nullptr, nullptr, slab_el, info);
@@ -2072,10 +2072,10 @@ int whole_fof_slabbed_host_fallback(const double* host, std::uint64_t count,
 
   for (std::uint64_t i = 0; i < count; ++i) {
     parent[i] = host_find(parent, std::uint32_t(i));
-    swift_group_ids_host[i] = 0;
+    group_ids_host[i] = 0;
   }
   for (std::uint64_t i = 0; i < count; ++i) {
-    ++swift_group_ids_host[parent[i]];
+    ++group_ids_host[parent[i]];
   }
 
   struct RootGroup {
@@ -2084,8 +2084,8 @@ int whole_fof_slabbed_host_fallback(const double* host, std::uint64_t count,
   };
   std::vector<RootGroup> valid_groups;
   for (std::uint64_t i = 0; i < count; ++i) {
-    if (parent[i] == std::uint32_t(i) && swift_group_ids_host[i] >= min_group_size) {
-      valid_groups.push_back({std::uint32_t(i), static_cast<std::uint64_t>(swift_group_ids_host[i])});
+    if (parent[i] == std::uint32_t(i) && group_ids_host[i] >= min_group_size) {
+      valid_groups.push_back({std::uint32_t(i), static_cast<std::uint64_t>(group_ids_host[i])});
     }
   }
   std::sort(valid_groups.begin(), valid_groups.end(), [](const RootGroup& a, const RootGroup& b) {
@@ -2093,14 +2093,14 @@ int whole_fof_slabbed_host_fallback(const double* host, std::uint64_t count,
     return a.root < b.root;
   });
 
-  std::fill_n(swift_group_ids_host, count, swift_fof::swift_fof_none);
+  std::fill_n(group_ids_host, count, grav_fof::grav_fof_none);
   std::uint64_t grouped_total = 0;
   for (std::size_t g = 0; g < valid_groups.size(); ++g) {
-    swift_group_ids_host[valid_groups[g].root] = static_cast<std::int64_t>(g) + 1LL;
+    group_ids_host[valid_groups[g].root] = static_cast<std::int64_t>(g) + 1LL;
     grouped_total += valid_groups[g].size;
   }
   for (std::uint64_t i = 0; i < count; ++i) {
-    swift_group_ids_host[i] = swift_group_ids_host[parent[i]];
+    group_ids_host[i] = group_ids_host[parent[i]];
   }
 
   if (out_num_groups) *out_num_groups = static_cast<std::uint64_t>(valid_groups.size());
@@ -2111,16 +2111,16 @@ int whole_fof_slabbed_host_fallback(const double* host, std::uint64_t count,
 
 }  // namespace
 
-extern "C" int whole_fof_slabbed_swift(const double* host, std::uint64_t count,
+extern "C" int whole_fof_slabbed(const double* host, std::uint64_t count,
                                        double lx, double ly, double lz, double link,
                                        int min_group_size, int num_slabs,
-                                       std::int64_t* swift_group_ids_host,
+                                       std::int64_t* group_ids_host,
                                        std::uint64_t* out_num_groups,
                                        std::uint64_t* out_grouped_particles,
                                        std::uint64_t* out_largest_group,
                                        double* elapsed, std::uint64_t* info) {
   try {
-    if (!host || !swift_group_ids_host || count == 0 ||
+    if (!host || !group_ids_host || count == 0 ||
         count > std::uint64_t(std::numeric_limits<std::uint32_t>::max()) - 1ULL ||
         lx <= 0.0 || ly <= 0.0 || lz <= 0.0 || link <= 0.0 ||
         min_group_size < 2 || num_slabs < 1) {
@@ -2139,49 +2139,49 @@ extern "C" int whole_fof_slabbed_swift(const double* host, std::uint64_t count,
     const int S = std::min(num_slabs, std::max(1, nx / 4));
     if (S <= 1) {
       if (count > (1ULL << 30)) return int(cudaErrorInvalidValue);
-      return swift_fof::run_fof_core(
+      return grav_fof::run_fof_core(
           host, int(count), lx, ly, lz, link,
-          true, min_group_size, nullptr, swift_group_ids_host,
+          true, min_group_size, nullptr, group_ids_host,
           out_num_groups, out_grouped_particles, out_largest_group, elapsed, info);
     }
 
-    swift_fof::check(cudaFree(nullptr));
+    grav_fof::check(cudaFree(nullptr));
     std::size_t free_mem = 0, total_mem = 0;
-    swift_fof::check(cudaMemGetInfo(&free_mem, &total_mem));
+    grav_fof::check(cudaMemGetInfo(&free_mem, &total_mem));
     if (info) {
       info[1] = free_mem;
       info[2] = total_mem;
     }
 
-    const bool force_stream = (std::getenv("SWIFT_FOF_FORCE_STREAM") && std::atoi(std::getenv("SWIFT_FOF_FORCE_STREAM")) != 0);
+    const bool force_stream = (std::getenv("GRAV_FOF_FORCE_STREAM") && std::atoi(std::getenv("GRAV_FOF_FORCE_STREAM")) != 0);
     const std::uint64_t max_slab_n = count / std::uint64_t(S) + count / (std::uint64_t(S) * 2ULL) +
                                      count / std::uint64_t(nx) + 1024ULL;
     const std::uint64_t slab_work_est = max_slab_n * 96ULL;
 
     // Tier 1: All-GPU slabbing + GPU union-find merge + GPU relabeling
     if (!force_stream && (count * 36ULL + slab_work_est) < std::uint64_t(0.70 * double(free_mem))) {
-      swift_fof::Timer timer;
-      swift_fof::Buffer<double3> d_host_pos(static_cast<std::size_t>(count));
+      grav_fof::Timer timer;
+      grav_fof::Buffer<double3> d_host_pos(static_cast<std::size_t>(count));
       double up_s = 0.0;
       timer.start();
-      swift_fof::check(cudaMemcpy(d_host_pos.ptr, host,
+      grav_fof::check(cudaMemcpy(d_host_pos.ptr, host,
                                   static_cast<std::size_t>(count) * sizeof(double3),
                                   cudaMemcpyHostToDevice));
       timer.stop(&up_s);
       if (elapsed) elapsed[0] += up_s;
 
-      swift_fof::Buffer<std::uint32_t> d_parent(static_cast<std::size_t>(count));
-      swift_fof::init_iota_u32_kernel<<<swift_fof::grid_for_u64(count), swift_fof::threads>>>(
+      grav_fof::Buffer<std::uint32_t> d_parent(static_cast<std::size_t>(count));
+      grav_fof::init_iota_u32_kernel<<<grav_fof::grid_for_u64(count), grav_fof::threads>>>(
           d_parent.ptr, count);
-      swift_fof::check(cudaGetLastError());
+      grav_fof::check(cudaGetLastError());
 
-      const int st = swift_fof::run_device_slabbed_merge_u32(
+      const int st = grav_fof::run_device_slabbed_merge_u32(
           d_host_pos.ptr, count, lx, ly, lz, link, S, d_parent.ptr, elapsed, info);
       if (st != 0) return st;
       d_host_pos.release();
 
-      swift_fof::finalize_and_relabel_swift_u32_gpu(
-          d_parent.ptr, count, min_group_size, swift_group_ids_host,
+      grav_fof::finalize_and_relabel_ranked_u32_gpu(
+          d_parent.ptr, count, min_group_size, group_ids_host,
           out_num_groups, out_grouped_particles, out_largest_group, elapsed);
       return 0;
     }
@@ -2277,10 +2277,10 @@ extern "C" int whole_fof_slabbed_swift(const double* host, std::uint64_t count,
         }
       }
 
-      swift_fof::Buffer<std::uint32_t> d_parent(static_cast<std::size_t>(count));
-      swift_fof::init_iota_u32_kernel<<<swift_fof::grid_for_u64(count), swift_fof::threads>>>(
+      grav_fof::Buffer<std::uint32_t> d_parent(static_cast<std::size_t>(count));
+      grav_fof::init_iota_u32_kernel<<<grav_fof::grid_for_u64(count), grav_fof::threads>>>(
           d_parent.ptr, count);
-      swift_fof::check(cudaGetLastError());
+      grav_fof::check(cudaGetLastError());
 
       std::vector<double> slab_pos;
       std::vector<std::uint32_t> slab_gids;
@@ -2309,13 +2309,13 @@ extern "C" int whole_fof_slabbed_swift(const double* host, std::uint64_t count,
           slab_pos[j * 3ULL + 2ULL] = src[2];
         }
 
-        swift_fof::Buffer<std::uint32_t> d_slab_gids(m_s);
-        swift_fof::check(cudaMemcpy(d_slab_gids.ptr, slab_gids.data(),
+        grav_fof::Buffer<std::uint32_t> d_slab_gids(m_s);
+        grav_fof::check(cudaMemcpy(d_slab_gids.ptr, slab_gids.data(),
                                     m_s * sizeof(std::uint32_t), cudaMemcpyHostToDevice));
         double slab_el[9]{};
-        const int st = swift_fof::run_fof_core_impl(
+        const int st = grav_fof::run_fof_core_impl(
             slab_pos.data(), false, false, int(m_s), lx, ly, lz, link,
-            swift_fof::OutMode::DeviceMerge, 2, nullptr, 0U,
+            grav_fof::OutMode::DeviceMerge, 2, nullptr, 0U,
             nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
             d_parent.ptr, d_slab_gids.ptr, nullptr, slab_el, info);
         if (st != 0) return st;
@@ -2329,17 +2329,17 @@ extern "C" int whole_fof_slabbed_swift(const double* host, std::uint64_t count,
       std::vector<double>().swap(slab_pos);
       std::vector<std::uint32_t>().swap(slab_gids);
 
-      swift_fof::finalize_and_relabel_swift_u32_gpu(
-          d_parent.ptr, count, min_group_size, swift_group_ids_host,
+      grav_fof::finalize_and_relabel_ranked_u32_gpu(
+          d_parent.ptr, count, min_group_size, group_ids_host,
           out_num_groups, out_grouped_particles, out_largest_group, elapsed);
       return 0;
     }
 
     return whole_fof_slabbed_host_fallback(
         host, count, lx, ly, lz, link, min_group_size, S, nx,
-        swift_group_ids_host, out_num_groups, out_grouped_particles, out_largest_group,
+        group_ids_host, out_num_groups, out_grouped_particles, out_largest_group,
         elapsed, info);
-  } catch (const swift_fof::GpuError& err) {
+  } catch (const grav_fof::GpuError& err) {
     return int(err.status);
   } catch (const std::bad_alloc&) {
     return int(cudaErrorMemoryAllocation);
@@ -2348,21 +2348,21 @@ extern "C" int whole_fof_slabbed_swift(const double* host, std::uint64_t count,
   }
 }
 
-extern "C" int whole_fof_multigpu_swift(int num_gpus, const int* dev_ids,
+extern "C" int whole_fof_multigpu(int num_gpus, const int* dev_ids,
                                         const double* const* dev_pos_xyz,
                                         const std::uint32_t* const* dev_orig_idx,
                                         const std::uint64_t* dev_counts,
                                         std::uint64_t total_count,
                                         double lx, double ly, double lz, double link,
                                         int min_group_size,
-                                        std::int64_t* swift_group_ids_host,
+                                        std::int64_t* group_ids_host,
                                         std::uint64_t* out_num_groups,
                                         std::uint64_t* out_grouped_particles,
                                         std::uint64_t* out_largest_group,
                                         double* elapsed) {
-  swift_fof::DeviceGuard dev_guard;
+  grav_fof::DeviceGuard dev_guard;
   try {
-    if (num_gpus < 1 || !dev_ids || !dev_pos_xyz || !dev_counts || !swift_group_ids_host ||
+    if (num_gpus < 1 || !dev_ids || !dev_pos_xyz || !dev_counts || !group_ids_host ||
         total_count == 0 ||
         total_count > std::uint64_t(std::numeric_limits<std::uint32_t>::max()) - 1ULL ||
         lx <= 0.0 || ly <= 0.0 || lz <= 0.0 || link <= 0.0 || min_group_size < 2) {
@@ -2388,60 +2388,60 @@ extern "C" int whole_fof_multigpu_swift(int num_gpus, const int* dev_ids,
 
     // Fast 1-GPU zero-copy path when single GPU fits directly
     if (num_gpus == 1) {
-      swift_fof::check(cudaSetDevice(dev_ids[0]));
-      swift_fof::check(cudaFree(nullptr));
+      grav_fof::check(cudaSetDevice(dev_ids[0]));
+      grav_fof::check(cudaFree(nullptr));
       std::size_t free_mem = 0, total_mem = 0;
-      swift_fof::check(cudaMemGetInfo(&free_mem, &total_mem));
+      grav_fof::check(cudaMemGetInfo(&free_mem, &total_mem));
       if (total_count <= (1ULL << 30) &&
           total_count * 96ULL < std::uint64_t(0.72 * double(free_mem))) {
         const std::uint32_t* orig0 = dev_orig_idx ? dev_orig_idx[0] : nullptr;
-        return swift_fof::run_fof_core_impl(
+        return grav_fof::run_fof_core_impl(
             dev_pos_xyz[0], true, false, int(total_count),
-            lx, ly, lz, link, swift_fof::OutMode::Swift, min_group_size,
-            orig0, 0U, nullptr, nullptr, swift_group_ids_host,
+            lx, ly, lz, link, grav_fof::OutMode::Ranked, min_group_size,
+            orig0, 0U, nullptr, nullptr, group_ids_host,
             out_num_groups, out_grouped_particles, out_largest_group,
             nullptr, nullptr, nullptr, elapsed, nullptr);
       }
       // Large 1-GPU fallback via sub-slabbing on device
-      swift_fof::Buffer<std::uint32_t> d_parent(static_cast<std::size_t>(total_count));
-      swift_fof::init_iota_u32_kernel<<<swift_fof::grid_for_u64(total_count), swift_fof::threads>>>(
+      grav_fof::Buffer<std::uint32_t> d_parent(static_cast<std::size_t>(total_count));
+      grav_fof::init_iota_u32_kernel<<<grav_fof::grid_for_u64(total_count), grav_fof::threads>>>(
           d_parent.ptr, total_count);
       const std::uint32_t* orig0 = dev_orig_idx ? dev_orig_idx[0] : nullptr;
       const int S = std::max(2, std::min(16, std::max(2, nx / 4)));
       // Wait: if orig0 != nullptr we map edges through orig0 by passing local_parent -> collect edges!
       if (!orig0) {
-        const int st = swift_fof::run_device_slabbed_merge_u32(
+        const int st = grav_fof::run_device_slabbed_merge_u32(
             reinterpret_cast<const double3*>(dev_pos_xyz[0]), total_count,
             lx, ly, lz, link, S, d_parent.ptr, elapsed, nullptr);
         if (st != 0) return st;
       } else {
-        swift_fof::Buffer<std::uint32_t> d_local_parent(static_cast<std::size_t>(total_count));
-        swift_fof::init_iota_u32_kernel<<<swift_fof::grid_for_u64(total_count), swift_fof::threads>>>(
+        grav_fof::Buffer<std::uint32_t> d_local_parent(static_cast<std::size_t>(total_count));
+        grav_fof::init_iota_u32_kernel<<<grav_fof::grid_for_u64(total_count), grav_fof::threads>>>(
             d_local_parent.ptr, total_count);
-        const int st = swift_fof::run_device_slabbed_merge_u32(
+        const int st = grav_fof::run_device_slabbed_merge_u32(
             reinterpret_cast<const double3*>(dev_pos_xyz[0]), total_count,
             lx, ly, lz, link, S, d_local_parent.ptr, elapsed, nullptr);
         if (st != 0) return st;
-        swift_fof::compress_parent_u32_kernel<<<swift_fof::grid_for_u64(total_count), swift_fof::threads>>>(
+        grav_fof::compress_parent_u32_kernel<<<grav_fof::grid_for_u64(total_count), grav_fof::threads>>>(
             d_local_parent.ptr, total_count);
-        swift_fof::Buffer<unsigned long long> d_ecnt(1);
-        swift_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
-        swift_fof::collect_local_parent_edges_kernel<<<swift_fof::grid_for_u64(total_count), swift_fof::threads>>>(
+        grav_fof::Buffer<unsigned long long> d_ecnt(1);
+        grav_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
+        grav_fof::collect_local_parent_edges_kernel<<<grav_fof::grid_for_u64(total_count), grav_fof::threads>>>(
             d_local_parent.ptr, orig0, 0U, total_count, nullptr, d_ecnt.ptr, false);
         unsigned long long n_ed = 0ULL;
-        swift_fof::check(cudaMemcpy(&n_ed, d_ecnt.ptr, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+        grav_fof::check(cudaMemcpy(&n_ed, d_ecnt.ptr, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
         if (n_ed > 0ULL) {
-          swift_fof::Buffer<uint2> d_edges(static_cast<std::size_t>(n_ed));
-          swift_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
-          swift_fof::collect_local_parent_edges_kernel<<<swift_fof::grid_for_u64(total_count), swift_fof::threads>>>(
+          grav_fof::Buffer<uint2> d_edges(static_cast<std::size_t>(n_ed));
+          grav_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
+          grav_fof::collect_local_parent_edges_kernel<<<grav_fof::grid_for_u64(total_count), grav_fof::threads>>>(
               d_local_parent.ptr, orig0, 0U, total_count, d_edges.ptr, d_ecnt.ptr, true);
           d_local_parent.release();
-          swift_fof::merge_edge_list_u32_kernel<<<swift_fof::grid_for_u64(n_ed), swift_fof::threads>>>(
+          grav_fof::merge_edge_list_u32_kernel<<<grav_fof::grid_for_u64(n_ed), grav_fof::threads>>>(
               d_edges.ptr, std::size_t(n_ed), d_parent.ptr);
         }
       }
-      swift_fof::finalize_and_relabel_swift_u32_gpu(
-          d_parent.ptr, total_count, min_group_size, swift_group_ids_host,
+      grav_fof::finalize_and_relabel_ranked_u32_gpu(
+          d_parent.ptr, total_count, min_group_size, group_ids_host,
           out_num_groups, out_grouped_particles, out_largest_group, elapsed);
       return 0;
     }
@@ -2462,70 +2462,70 @@ extern "C" int whole_fof_multigpu_swift(int num_gpus, const int* dev_ids,
         try {
           const std::uint64_t n_g = dev_counts[g];
           if (n_g == 0ULL) return;
-          swift_fof::check(cudaSetDevice(dev_ids[g]));
-          swift_fof::check(cudaFree(nullptr));
+          grav_fof::check(cudaSetDevice(dev_ids[g]));
+          grav_fof::check(cudaFree(nullptr));
 
           const std::uint32_t* orig_g = dev_orig_idx ? dev_orig_idx[g] : nullptr;
           const std::uint32_t gid_off_g = static_cast<std::uint32_t>(prefix[g]);
           const double3* pos_g = reinterpret_cast<const double3*>(dev_pos_xyz[g]);
 
-          swift_fof::Buffer<std::uint32_t> d_occ(nwords);
-          swift_fof::Buffer<int> d_invalid(1);
-          swift_fof::check(cudaMemset(d_occ.ptr, 0, nwords * sizeof(std::uint32_t)));
-          swift_fof::check(cudaMemset(d_invalid.ptr, 0, sizeof(int)));
-          swift_fof::mark_coarse_occ_kernel<<<swift_fof::grid_for_u64(n_g), swift_fof::threads>>>(
+          grav_fof::Buffer<std::uint32_t> d_occ(nwords);
+          grav_fof::Buffer<int> d_invalid(1);
+          grav_fof::check(cudaMemset(d_occ.ptr, 0, nwords * sizeof(std::uint32_t)));
+          grav_fof::check(cudaMemset(d_invalid.ptr, 0, sizeof(int)));
+          grav_fof::mark_coarse_occ_kernel<<<grav_fof::grid_for_u64(n_g), grav_fof::threads>>>(
               pos_g, n_g, orig_g, total_count, lx, ly, lz, M, d_occ.ptr, d_invalid.ptr);
           int bad = 0;
-          swift_fof::check(cudaMemcpy(&bad, d_invalid.ptr, sizeof(int), cudaMemcpyDeviceToHost));
+          grav_fof::check(cudaMemcpy(&bad, d_invalid.ptr, sizeof(int), cudaMemcpyDeviceToHost));
           if (bad) {
             s1_status[g] = int(cudaErrorInvalidValue);
             return;
           }
-          swift_fof::check(cudaMemcpy(h_occ[g].data(), d_occ.ptr, nwords * sizeof(std::uint32_t),
+          grav_fof::check(cudaMemcpy(h_occ[g].data(), d_occ.ptr, nwords * sizeof(std::uint32_t),
                                       cudaMemcpyDeviceToHost));
           d_occ.release();
           d_invalid.release();
 
           std::size_t free_g = 0, total_g = 0;
-          swift_fof::check(cudaMemGetInfo(&free_g, &total_g));
+          grav_fof::check(cudaMemGetInfo(&free_g, &total_g));
           if (n_g <= (1ULL << 30) && n_g * 96ULL < std::uint64_t(0.72 * double(free_g))) {
-            s1_status[g] = swift_fof::run_fof_core_impl(
+            s1_status[g] = grav_fof::run_fof_core_impl(
                 dev_pos_xyz[g], true, false, int(n_g),
-                lx, ly, lz, link, swift_fof::OutMode::DeviceMerge, 2,
+                lx, ly, lz, link, grav_fof::OutMode::DeviceMerge, 2,
                 orig_g, gid_off_g, nullptr, nullptr, nullptr,
                 nullptr, nullptr, nullptr,
                 nullptr, nullptr, &h_edges[g], nullptr, nullptr);
           } else {
-            swift_fof::Buffer<std::uint32_t> d_loc_parent(static_cast<std::size_t>(n_g));
-            swift_fof::init_iota_u32_kernel<<<swift_fof::grid_for_u64(n_g), swift_fof::threads>>>(
+            grav_fof::Buffer<std::uint32_t> d_loc_parent(static_cast<std::size_t>(n_g));
+            grav_fof::init_iota_u32_kernel<<<grav_fof::grid_for_u64(n_g), grav_fof::threads>>>(
                 d_loc_parent.ptr, n_g);
             const int S_loc = std::max(2, std::min(16, std::max(2, nx / 4)));
-            const int st = swift_fof::run_device_slabbed_merge_u32(
+            const int st = grav_fof::run_device_slabbed_merge_u32(
                 pos_g, n_g, lx, ly, lz, link, S_loc, d_loc_parent.ptr, nullptr, nullptr);
             if (st != 0) {
               s1_status[g] = st;
               return;
             }
-            swift_fof::compress_parent_u32_kernel<<<swift_fof::grid_for_u64(n_g), swift_fof::threads>>>(
+            grav_fof::compress_parent_u32_kernel<<<grav_fof::grid_for_u64(n_g), grav_fof::threads>>>(
                 d_loc_parent.ptr, n_g);
-            swift_fof::Buffer<unsigned long long> d_ecnt(1);
-            swift_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
-            swift_fof::collect_local_parent_edges_kernel<<<swift_fof::grid_for_u64(n_g), swift_fof::threads>>>(
+            grav_fof::Buffer<unsigned long long> d_ecnt(1);
+            grav_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
+            grav_fof::collect_local_parent_edges_kernel<<<grav_fof::grid_for_u64(n_g), grav_fof::threads>>>(
                 d_loc_parent.ptr, orig_g, gid_off_g, n_g, nullptr, d_ecnt.ptr, false);
             unsigned long long n_ed = 0ULL;
-            swift_fof::check(cudaMemcpy(&n_ed, d_ecnt.ptr, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+            grav_fof::check(cudaMemcpy(&n_ed, d_ecnt.ptr, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
             h_edges[g].resize(static_cast<std::size_t>(n_ed));
             if (n_ed > 0ULL) {
-              swift_fof::Buffer<uint2> d_ed(static_cast<std::size_t>(n_ed));
-              swift_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
-              swift_fof::collect_local_parent_edges_kernel<<<swift_fof::grid_for_u64(n_g), swift_fof::threads>>>(
+              grav_fof::Buffer<uint2> d_ed(static_cast<std::size_t>(n_ed));
+              grav_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
+              grav_fof::collect_local_parent_edges_kernel<<<grav_fof::grid_for_u64(n_g), grav_fof::threads>>>(
                   d_loc_parent.ptr, orig_g, gid_off_g, n_g, d_ed.ptr, d_ecnt.ptr, true);
-              swift_fof::check(cudaMemcpy(h_edges[g].data(), d_ed.ptr,
+              grav_fof::check(cudaMemcpy(h_edges[g].data(), d_ed.ptr,
                                           static_cast<std::size_t>(n_ed) * sizeof(uint2),
                                           cudaMemcpyDeviceToHost));
             }
           }
-        } catch (const swift_fof::GpuError& err) {
+        } catch (const grav_fof::GpuError& err) {
           s1_status[g] = int(err.status);
         } catch (...) {
           s1_status[g] = int(cudaErrorUnknown);
@@ -2560,39 +2560,39 @@ extern "C" int whole_fof_multigpu_swift(int num_gpus, const int* dev_ids,
           }
           if (!any_other) return;
 
-          swift_fof::check(cudaSetDevice(dev_ids[g]));
-          swift_fof::Buffer<std::uint32_t> d_other(nwords);
-          swift_fof::check(cudaMemcpy(d_other.ptr, other_occ.data(),
+          grav_fof::check(cudaSetDevice(dev_ids[g]));
+          grav_fof::Buffer<std::uint32_t> d_other(nwords);
+          grav_fof::check(cudaMemcpy(d_other.ptr, other_occ.data(),
                                       nwords * sizeof(std::uint32_t), cudaMemcpyHostToDevice));
-          swift_fof::Buffer<unsigned long long> d_bcnt(1);
-          swift_fof::check(cudaMemset(d_bcnt.ptr, 0, sizeof(unsigned long long)));
+          grav_fof::Buffer<unsigned long long> d_bcnt(1);
+          grav_fof::check(cudaMemset(d_bcnt.ptr, 0, sizeof(unsigned long long)));
 
           const double3* pos_g = reinterpret_cast<const double3*>(dev_pos_xyz[g]);
           const std::uint32_t* orig_g = dev_orig_idx ? dev_orig_idx[g] : nullptr;
           const std::uint32_t gid_off_g = static_cast<std::uint32_t>(prefix[g]);
 
-          swift_fof::extract_boundary_particles_kernel<<<swift_fof::grid_for_u64(n_g), swift_fof::threads>>>(
+          grav_fof::extract_boundary_particles_kernel<<<grav_fof::grid_for_u64(n_g), grav_fof::threads>>>(
               pos_g, n_g, orig_g, gid_off_g, lx, ly, lz, link, M, d_other.ptr,
               nullptr, nullptr, d_bcnt.ptr, false);
           unsigned long long b_cnt = 0ULL;
-          swift_fof::check(cudaMemcpy(&b_cnt, d_bcnt.ptr, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+          grav_fof::check(cudaMemcpy(&b_cnt, d_bcnt.ptr, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
           if (b_cnt == 0ULL) return;
 
-          swift_fof::Buffer<double3> d_bp(static_cast<std::size_t>(b_cnt));
-          swift_fof::Buffer<std::uint32_t> d_bg(static_cast<std::size_t>(b_cnt));
-          swift_fof::check(cudaMemset(d_bcnt.ptr, 0, sizeof(unsigned long long)));
-          swift_fof::extract_boundary_particles_kernel<<<swift_fof::grid_for_u64(n_g), swift_fof::threads>>>(
+          grav_fof::Buffer<double3> d_bp(static_cast<std::size_t>(b_cnt));
+          grav_fof::Buffer<std::uint32_t> d_bg(static_cast<std::size_t>(b_cnt));
+          grav_fof::check(cudaMemset(d_bcnt.ptr, 0, sizeof(unsigned long long)));
+          grav_fof::extract_boundary_particles_kernel<<<grav_fof::grid_for_u64(n_g), grav_fof::threads>>>(
               pos_g, n_g, orig_g, gid_off_g, lx, ly, lz, link, M, d_other.ptr,
               d_bp.ptr, d_bg.ptr, d_bcnt.ptr, true);
           h_bpos[g].resize(static_cast<std::size_t>(b_cnt));
           h_bgids[g].resize(static_cast<std::size_t>(b_cnt));
-          swift_fof::check(cudaMemcpy(h_bpos[g].data(), d_bp.ptr,
+          grav_fof::check(cudaMemcpy(h_bpos[g].data(), d_bp.ptr,
                                       static_cast<std::size_t>(b_cnt) * sizeof(double3),
                                       cudaMemcpyDeviceToHost));
-          swift_fof::check(cudaMemcpy(h_bgids[g].data(), d_bg.ptr,
+          grav_fof::check(cudaMemcpy(h_bgids[g].data(), d_bg.ptr,
                                       static_cast<std::size_t>(b_cnt) * sizeof(std::uint32_t),
                                       cudaMemcpyDeviceToHost));
-        } catch (const swift_fof::GpuError& err) {
+        } catch (const grav_fof::GpuError& err) {
           s2_status[g] = int(err.status);
         } catch (...) {
           s2_status[g] = int(cudaErrorUnknown);
@@ -2606,22 +2606,22 @@ extern "C" int whole_fof_multigpu_swift(int num_gpus, const int* dev_ids,
     std::vector<std::vector<std::uint32_t>>().swap(h_occ);
 
     // Stage 2B: Global union-find merge + cross-domain boundary FoF + relabel on dev_ids[0]
-    swift_fof::check(cudaSetDevice(dev_ids[0]));
-    swift_fof::Buffer<std::uint32_t> d_parent(static_cast<std::size_t>(total_count));
-    swift_fof::init_iota_u32_kernel<<<swift_fof::grid_for_u64(total_count), swift_fof::threads>>>(
+    grav_fof::check(cudaSetDevice(dev_ids[0]));
+    grav_fof::Buffer<std::uint32_t> d_parent(static_cast<std::size_t>(total_count));
+    grav_fof::init_iota_u32_kernel<<<grav_fof::grid_for_u64(total_count), grav_fof::threads>>>(
         d_parent.ptr, total_count);
-    swift_fof::check(cudaGetLastError());
+    grav_fof::check(cudaGetLastError());
 
     for (int g = 0; g < num_gpus; ++g) {
       const std::size_t ne = h_edges[g].size();
       if (ne > 0) {
         const std::size_t edge_chunk = 32ULL << 20;
-        swift_fof::Buffer<uint2> d_ed(std::min(ne, edge_chunk));
+        grav_fof::Buffer<uint2> d_ed(std::min(ne, edge_chunk));
         for (std::size_t off = 0; off < ne; off += edge_chunk) {
           const std::size_t cur = std::min(edge_chunk, ne - off);
-          swift_fof::check(cudaMemcpy(d_ed.ptr, h_edges[g].data() + off,
+          grav_fof::check(cudaMemcpy(d_ed.ptr, h_edges[g].data() + off,
                                       cur * sizeof(uint2), cudaMemcpyHostToDevice));
-          swift_fof::merge_edge_list_u32_kernel<<<swift_fof::grid_for_u64(cur), swift_fof::threads>>>(
+          grav_fof::merge_edge_list_u32_kernel<<<grav_fof::grid_for_u64(cur), grav_fof::threads>>>(
               d_ed.ptr, cur, d_parent.ptr);
         }
       }
@@ -2645,57 +2645,57 @@ extern "C" int whole_fof_multigpu_swift(int num_gpus, const int* dev_ids,
       }
 
       std::size_t free0 = 0, total0 = 0;
-      swift_fof::check(cudaMemGetInfo(&free0, &total0));
-      swift_fof::Buffer<std::uint32_t> d_bgids(total_B);
-      swift_fof::check(cudaMemcpy(d_bgids.ptr, bgids_all.data(),
+      grav_fof::check(cudaMemGetInfo(&free0, &total0));
+      grav_fof::Buffer<std::uint32_t> d_bgids(total_B);
+      grav_fof::check(cudaMemcpy(d_bgids.ptr, bgids_all.data(),
                                   total_B * sizeof(std::uint32_t), cudaMemcpyHostToDevice));
 
       if (total_B <= (1ULL << 30) &&
           std::uint64_t(total_B) * 96ULL < std::uint64_t(0.70 * double(free0))) {
-        const int st = swift_fof::run_fof_core_impl(
+        const int st = grav_fof::run_fof_core_impl(
             reinterpret_cast<const double*>(bpos_all.data()), false, false, int(total_B),
-            lx, ly, lz, link, swift_fof::OutMode::DeviceMerge, 2, nullptr, 0U,
+            lx, ly, lz, link, grav_fof::OutMode::DeviceMerge, 2, nullptr, 0U,
             nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
             d_parent.ptr, d_bgids.ptr, nullptr, elapsed, nullptr);
         if (st != 0) return st;
       } else {
         // Fallback if massive boundary (e.g. random partition across GPUs)
-        swift_fof::Buffer<double3> d_bpos(total_B);
-        swift_fof::check(cudaMemcpy(d_bpos.ptr, bpos_all.data(),
+        grav_fof::Buffer<double3> d_bpos(total_B);
+        grav_fof::check(cudaMemcpy(d_bpos.ptr, bpos_all.data(),
                                     total_B * sizeof(double3), cudaMemcpyHostToDevice));
-        swift_fof::Buffer<std::uint32_t> d_bloc_parent(total_B);
-        swift_fof::init_iota_u32_kernel<<<swift_fof::grid_for_u64(total_B), swift_fof::threads>>>(
+        grav_fof::Buffer<std::uint32_t> d_bloc_parent(total_B);
+        grav_fof::init_iota_u32_kernel<<<grav_fof::grid_for_u64(total_B), grav_fof::threads>>>(
             d_bloc_parent.ptr, total_B);
         const int S_bnd = std::max(2, std::min(16, std::max(2, nx / 4)));
-        const int st = swift_fof::run_device_slabbed_merge_u32(
+        const int st = grav_fof::run_device_slabbed_merge_u32(
             d_bpos.ptr, total_B, lx, ly, lz, link, S_bnd, d_bloc_parent.ptr, elapsed, nullptr);
         if (st != 0) return st;
         d_bpos.release();
-        swift_fof::compress_parent_u32_kernel<<<swift_fof::grid_for_u64(total_B), swift_fof::threads>>>(
+        grav_fof::compress_parent_u32_kernel<<<grav_fof::grid_for_u64(total_B), grav_fof::threads>>>(
             d_bloc_parent.ptr, total_B);
-        swift_fof::Buffer<unsigned long long> d_ecnt(1);
-        swift_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
-        swift_fof::collect_local_parent_edges_kernel<<<swift_fof::grid_for_u64(total_B), swift_fof::threads>>>(
+        grav_fof::Buffer<unsigned long long> d_ecnt(1);
+        grav_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
+        grav_fof::collect_local_parent_edges_kernel<<<grav_fof::grid_for_u64(total_B), grav_fof::threads>>>(
             d_bloc_parent.ptr, d_bgids.ptr, 0U, total_B, nullptr, d_ecnt.ptr, false);
         unsigned long long n_ed = 0ULL;
-        swift_fof::check(cudaMemcpy(&n_ed, d_ecnt.ptr, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+        grav_fof::check(cudaMemcpy(&n_ed, d_ecnt.ptr, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
         if (n_ed > 0ULL) {
-          swift_fof::Buffer<uint2> d_ed(static_cast<std::size_t>(n_ed));
-          swift_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
-          swift_fof::collect_local_parent_edges_kernel<<<swift_fof::grid_for_u64(total_B), swift_fof::threads>>>(
+          grav_fof::Buffer<uint2> d_ed(static_cast<std::size_t>(n_ed));
+          grav_fof::check(cudaMemset(d_ecnt.ptr, 0, sizeof(unsigned long long)));
+          grav_fof::collect_local_parent_edges_kernel<<<grav_fof::grid_for_u64(total_B), grav_fof::threads>>>(
               d_bloc_parent.ptr, d_bgids.ptr, 0U, total_B, d_ed.ptr, d_ecnt.ptr, true);
           d_bloc_parent.release();
-          swift_fof::merge_edge_list_u32_kernel<<<swift_fof::grid_for_u64(n_ed), swift_fof::threads>>>(
+          grav_fof::merge_edge_list_u32_kernel<<<grav_fof::grid_for_u64(n_ed), grav_fof::threads>>>(
               d_ed.ptr, std::size_t(n_ed), d_parent.ptr);
         }
       }
     }
 
-    swift_fof::finalize_and_relabel_swift_u32_gpu(
-        d_parent.ptr, total_count, min_group_size, swift_group_ids_host,
+    grav_fof::finalize_and_relabel_ranked_u32_gpu(
+        d_parent.ptr, total_count, min_group_size, group_ids_host,
         out_num_groups, out_grouped_particles, out_largest_group, elapsed);
     return 0;
-  } catch (const swift_fof::GpuError& err) {
+  } catch (const grav_fof::GpuError& err) {
     return int(err.status);
   } catch (const std::bad_alloc&) {
     return int(cudaErrorMemoryAllocation);
@@ -2708,7 +2708,7 @@ extern "C" int whole_fof_multigpu_swift(int num_gpus, const int* dev_ids,
 // Full-GPU compute_fof_catalog & compute_fof_so Kernels + Launchers
 // ============================================================================
 
-namespace swift_fof {
+namespace grav_fof {
 
 __global__ void init_u32_val_kernel(std::uint32_t* arr, std::size_t n, std::uint32_t val) {
   const std::size_t stride = std::size_t(gridDim.x) * std::size_t(blockDim.x);
@@ -3572,7 +3572,7 @@ __global__ void so_solve_nonuniform_heavy_kernel(const double* r2_out, const flo
   }
 }
 
-}  // namespace swift_fof
+}  // namespace grav_fof
 
 namespace {
 
@@ -3755,14 +3755,14 @@ int compute_fof_so_cpu_fallback(const double* pos_xyz, const float* masses_or_nu
 
 extern "C" int compute_fof_catalog(const double* pos_xyz, const float* vel_xyz,
                                    const float* masses_or_null, double uniform_mass,
-                                   const std::int64_t* swift_group_ids,
+                                   const std::int64_t* group_ids,
                                    std::uint64_t count, std::uint64_t num_groups,
                                    double lx, double ly, double lz,
                                    FofHaloRow* out_halos) {
   static_assert(sizeof(FofHaloRow) == 88, "FofHaloRow layout mismatch");
   try {
     if (num_groups == 0) return 0;
-    if (!pos_xyz || !swift_group_ids || !out_halos || count == 0 ||
+    if (!pos_xyz || !group_ids || !out_halos || count == 0 ||
         lx <= 0.0 || ly <= 0.0 || lz <= 0.0) {
       return int(cudaErrorInvalidValue);
     }
@@ -3771,67 +3771,67 @@ extern "C" int compute_fof_catalog(const double* pos_xyz, const float* vel_xyz,
     }
 
     const std::size_t ng = static_cast<std::size_t>(num_groups);
-    swift_fof::check(cudaFree(nullptr));
+    grav_fof::check(cudaFree(nullptr));
     std::size_t free_mem = 0, total_mem = 0;
-    swift_fof::check(cudaMemGetInfo(&free_mem, &total_mem));
+    grav_fof::check(cudaMemGetInfo(&free_mem, &total_mem));
 
-    swift_fof::Buffer<double3> d_anchor(ng);
-    swift_fof::Buffer<unsigned char> d_has_anchor(ng);
-    swift_fof::Buffer<std::uint32_t> d_chunk_anchor_j(ng);
-    swift_fof::Buffer<unsigned long long> d_size(ng);
-    swift_fof::Buffer<double> d_mass(ng), d_com_x(ng), d_com_y(ng), d_com_z(ng);
-    swift_fof::Buffer<double> d_bvel_x(ng), d_bvel_y(ng), d_bvel_z(ng);
-    swift_fof::Buffer<double> d_max_r2(ng), d_sum_mv2(ng);
-    swift_fof::Buffer<int> d_invalid(1);
+    grav_fof::Buffer<double3> d_anchor(ng);
+    grav_fof::Buffer<unsigned char> d_has_anchor(ng);
+    grav_fof::Buffer<std::uint32_t> d_chunk_anchor_j(ng);
+    grav_fof::Buffer<unsigned long long> d_size(ng);
+    grav_fof::Buffer<double> d_mass(ng), d_com_x(ng), d_com_y(ng), d_com_z(ng);
+    grav_fof::Buffer<double> d_bvel_x(ng), d_bvel_y(ng), d_bvel_z(ng);
+    grav_fof::Buffer<double> d_max_r2(ng), d_sum_mv2(ng);
+    grav_fof::Buffer<int> d_invalid(1);
 
-    swift_fof::check(cudaMemset(d_anchor.ptr, 0, ng * sizeof(double3)));
-    swift_fof::check(cudaMemset(d_has_anchor.ptr, 0, ng * sizeof(unsigned char)));
-    swift_fof::check(cudaMemset(d_size.ptr, 0, ng * sizeof(unsigned long long)));
-    swift_fof::check(cudaMemset(d_mass.ptr, 0, ng * sizeof(double)));
-    swift_fof::check(cudaMemset(d_com_x.ptr, 0, ng * sizeof(double)));
-    swift_fof::check(cudaMemset(d_com_y.ptr, 0, ng * sizeof(double)));
-    swift_fof::check(cudaMemset(d_com_z.ptr, 0, ng * sizeof(double)));
-    swift_fof::check(cudaMemset(d_bvel_x.ptr, 0, ng * sizeof(double)));
-    swift_fof::check(cudaMemset(d_bvel_y.ptr, 0, ng * sizeof(double)));
-    swift_fof::check(cudaMemset(d_bvel_z.ptr, 0, ng * sizeof(double)));
-    swift_fof::check(cudaMemset(d_max_r2.ptr, 0, ng * sizeof(double)));
-    swift_fof::check(cudaMemset(d_sum_mv2.ptr, 0, ng * sizeof(double)));
-    swift_fof::check(cudaMemset(d_invalid.ptr, 0, sizeof(int)));
+    grav_fof::check(cudaMemset(d_anchor.ptr, 0, ng * sizeof(double3)));
+    grav_fof::check(cudaMemset(d_has_anchor.ptr, 0, ng * sizeof(unsigned char)));
+    grav_fof::check(cudaMemset(d_size.ptr, 0, ng * sizeof(unsigned long long)));
+    grav_fof::check(cudaMemset(d_mass.ptr, 0, ng * sizeof(double)));
+    grav_fof::check(cudaMemset(d_com_x.ptr, 0, ng * sizeof(double)));
+    grav_fof::check(cudaMemset(d_com_y.ptr, 0, ng * sizeof(double)));
+    grav_fof::check(cudaMemset(d_com_z.ptr, 0, ng * sizeof(double)));
+    grav_fof::check(cudaMemset(d_bvel_x.ptr, 0, ng * sizeof(double)));
+    grav_fof::check(cudaMemset(d_bvel_y.ptr, 0, ng * sizeof(double)));
+    grav_fof::check(cudaMemset(d_bvel_z.ptr, 0, ng * sizeof(double)));
+    grav_fof::check(cudaMemset(d_max_r2.ptr, 0, ng * sizeof(double)));
+    grav_fof::check(cudaMemset(d_sum_mv2.ptr, 0, ng * sizeof(double)));
+    grav_fof::check(cudaMemset(d_invalid.ptr, 0, sizeof(int)));
 
-    swift_fof::check(cudaMemGetInfo(&free_mem, &total_mem));
+    grav_fof::check(cudaMemGetInfo(&free_mem, &total_mem));
     std::uint64_t chunk_max = std::min<std::uint64_t>(
         count, std::min<std::uint64_t>(32ULL << 20, std::max<std::uint64_t>(1ULL << 20, free_mem / 128ULL)));
-    if (const char* env_c = std::getenv("SWIFT_FOF_CATALOG_CHUNK")) {
+    if (const char* env_c = std::getenv("GRAV_FOF_CATALOG_CHUNK")) {
       const std::uint64_t v = std::strtoull(env_c, nullptr, 10);
       if (v > 0ULL) chunk_max = std::min(count, v);
     }
     const std::size_t buf_n = static_cast<std::size_t>(chunk_max);
     const bool single_chunk = (chunk_max >= count);
 
-    swift_fof::Buffer<double3> d_pos(buf_n);
-    swift_fof::Buffer<float3> d_vel(vel_xyz ? buf_n : 0ULL);
-    swift_fof::Buffer<float> d_masses(masses_or_null ? buf_n : 0ULL);
-    swift_fof::Buffer<std::int64_t> d_gids(buf_n);
+    grav_fof::Buffer<double3> d_pos(buf_n);
+    grav_fof::Buffer<float3> d_vel(vel_xyz ? buf_n : 0ULL);
+    grav_fof::Buffer<float> d_masses(masses_or_null ? buf_n : 0ULL);
+    grav_fof::Buffer<std::int64_t> d_gids(buf_n);
 
     // Pass 1 (anchor selection + mass-weighted CoM & bulk velocity)
     for (std::uint64_t base = 0; base < count; base += chunk_max) {
       const std::size_t cur = static_cast<std::size_t>(std::min<std::uint64_t>(chunk_max, count - base));
-      swift_fof::check(cudaMemcpy(d_pos.ptr, pos_xyz + base * 3ULL, cur * sizeof(double3), cudaMemcpyHostToDevice));
+      grav_fof::check(cudaMemcpy(d_pos.ptr, pos_xyz + base * 3ULL, cur * sizeof(double3), cudaMemcpyHostToDevice));
       if (vel_xyz) {
-        swift_fof::check(cudaMemcpy(d_vel.ptr, vel_xyz + base * 3ULL, cur * sizeof(float3), cudaMemcpyHostToDevice));
+        grav_fof::check(cudaMemcpy(d_vel.ptr, vel_xyz + base * 3ULL, cur * sizeof(float3), cudaMemcpyHostToDevice));
       }
       if (masses_or_null) {
-        swift_fof::check(cudaMemcpy(d_masses.ptr, masses_or_null + base, cur * sizeof(float), cudaMemcpyHostToDevice));
+        grav_fof::check(cudaMemcpy(d_masses.ptr, masses_or_null + base, cur * sizeof(float), cudaMemcpyHostToDevice));
       }
-      swift_fof::check(cudaMemcpy(d_gids.ptr, swift_group_ids + base, cur * sizeof(std::int64_t), cudaMemcpyHostToDevice));
+      grav_fof::check(cudaMemcpy(d_gids.ptr, group_ids + base, cur * sizeof(std::int64_t), cudaMemcpyHostToDevice));
 
-      swift_fof::init_u32_val_kernel<<<swift_fof::grid_for_u64(ng), swift_fof::threads>>>(
+      grav_fof::init_u32_val_kernel<<<grav_fof::grid_for_u64(ng), grav_fof::threads>>>(
           d_chunk_anchor_j.ptr, ng, std::uint32_t(0xFFFFFFFFU));
-      swift_fof::catalog_find_chunk_anchors_kernel<<<swift_fof::grid_for_u64(cur), swift_fof::threads>>>(
+      grav_fof::catalog_find_chunk_anchors_kernel<<<grav_fof::grid_for_u64(cur), grav_fof::threads>>>(
           d_gids.ptr, cur, num_groups, d_has_anchor.ptr, d_chunk_anchor_j.ptr);
-      swift_fof::catalog_commit_anchors_kernel<<<swift_fof::grid_for_u64(ng), swift_fof::threads>>>(
+      grav_fof::catalog_commit_anchors_kernel<<<grav_fof::grid_for_u64(ng), grav_fof::threads>>>(
           d_pos.ptr, cur, ng, lx, ly, lz, d_has_anchor.ptr, d_chunk_anchor_j.ptr, d_anchor.ptr);
-      swift_fof::catalog_pass1_kernel<<<swift_fof::grid_for_u64(cur), swift_fof::threads>>>(
+      grav_fof::catalog_pass1_kernel<<<grav_fof::grid_for_u64(cur), grav_fof::threads>>>(
           d_pos.ptr, vel_xyz ? d_vel.ptr : nullptr, masses_or_null ? d_masses.ptr : nullptr, uniform_mass,
           d_gids.ptr, cur, num_groups, lx, ly, lz, d_anchor.ptr,
           d_size.ptr, d_mass.ptr, d_com_x.ptr, d_com_y.ptr, d_com_z.ptr,
@@ -3840,14 +3840,14 @@ extern "C" int compute_fof_catalog(const double* pos_xyz, const float* vel_xyz,
     }
 
     int invalid_h = 0;
-    swift_fof::check(cudaMemcpy(&invalid_h, d_invalid.ptr, sizeof(int), cudaMemcpyDeviceToHost));
+    grav_fof::check(cudaMemcpy(&invalid_h, d_invalid.ptr, sizeof(int), cudaMemcpyDeviceToHost));
     if (invalid_h) return int(cudaErrorInvalidValue);
 
-    swift_fof::catalog_finalize_pass1_kernel<<<swift_fof::grid_for_u64(ng), swift_fof::threads>>>(
+    grav_fof::catalog_finalize_pass1_kernel<<<grav_fof::grid_for_u64(ng), grav_fof::threads>>>(
         ng, lx, ly, lz, d_anchor.ptr, d_size.ptr, d_mass.ptr,
         d_com_x.ptr, d_com_y.ptr, d_com_z.ptr, d_bvel_x.ptr, d_bvel_y.ptr, d_bvel_z.ptr,
         d_invalid.ptr);
-    swift_fof::check(cudaMemcpy(&invalid_h, d_invalid.ptr, sizeof(int), cudaMemcpyDeviceToHost));
+    grav_fof::check(cudaMemcpy(&invalid_h, d_invalid.ptr, sizeof(int), cudaMemcpyDeviceToHost));
     if (invalid_h) return int(cudaErrorInvalidValue);
 
     d_anchor.release();
@@ -3859,16 +3859,16 @@ extern "C" int compute_fof_catalog(const double* pos_xyz, const float* vel_xyz,
     for (std::uint64_t base = 0; base < count; base += chunk_max) {
       const std::size_t cur = static_cast<std::size_t>(std::min<std::uint64_t>(chunk_max, count - base));
       if (!single_chunk) {
-        swift_fof::check(cudaMemcpy(d_pos.ptr, pos_xyz + base * 3ULL, cur * sizeof(double3), cudaMemcpyHostToDevice));
+        grav_fof::check(cudaMemcpy(d_pos.ptr, pos_xyz + base * 3ULL, cur * sizeof(double3), cudaMemcpyHostToDevice));
         if (vel_xyz) {
-          swift_fof::check(cudaMemcpy(d_vel.ptr, vel_xyz + base * 3ULL, cur * sizeof(float3), cudaMemcpyHostToDevice));
+          grav_fof::check(cudaMemcpy(d_vel.ptr, vel_xyz + base * 3ULL, cur * sizeof(float3), cudaMemcpyHostToDevice));
         }
         if (masses_or_null) {
-          swift_fof::check(cudaMemcpy(d_masses.ptr, masses_or_null + base, cur * sizeof(float), cudaMemcpyHostToDevice));
+          grav_fof::check(cudaMemcpy(d_masses.ptr, masses_or_null + base, cur * sizeof(float), cudaMemcpyHostToDevice));
         }
-        swift_fof::check(cudaMemcpy(d_gids.ptr, swift_group_ids + base, cur * sizeof(std::int64_t), cudaMemcpyHostToDevice));
+        grav_fof::check(cudaMemcpy(d_gids.ptr, group_ids + base, cur * sizeof(std::int64_t), cudaMemcpyHostToDevice));
       }
-      swift_fof::catalog_pass2_kernel<<<swift_fof::grid_for_u64(cur), swift_fof::threads>>>(
+      grav_fof::catalog_pass2_kernel<<<grav_fof::grid_for_u64(cur), grav_fof::threads>>>(
           d_pos.ptr, vel_xyz ? d_vel.ptr : nullptr, masses_or_null ? d_masses.ptr : nullptr, uniform_mass,
           d_gids.ptr, cur, num_groups, lx, ly, lz,
           d_com_x.ptr, d_com_y.ptr, d_com_z.ptr,
@@ -3882,13 +3882,13 @@ extern "C" int compute_fof_catalog(const double* pos_xyz, const float* vel_xyz,
     d_masses.release();
     d_gids.release();
 
-    swift_fof::Buffer<FofHaloRow> d_out(ng);
-    swift_fof::catalog_pack_rows_kernel<<<swift_fof::grid_for_u64(ng), swift_fof::threads>>>(
+    grav_fof::Buffer<FofHaloRow> d_out(ng);
+    grav_fof::catalog_pack_rows_kernel<<<grav_fof::grid_for_u64(ng), grav_fof::threads>>>(
         ng, d_size.ptr, d_mass.ptr, d_com_x.ptr, d_com_y.ptr, d_com_z.ptr,
         d_bvel_x.ptr, d_bvel_y.ptr, d_bvel_z.ptr, d_max_r2.ptr, d_sum_mv2.ptr, d_out.ptr);
-    swift_fof::check(cudaMemcpy(out_halos, d_out.ptr, ng * sizeof(FofHaloRow), cudaMemcpyDeviceToHost));
+    grav_fof::check(cudaMemcpy(out_halos, d_out.ptr, ng * sizeof(FofHaloRow), cudaMemcpyDeviceToHost));
     return 0;
-  } catch (const swift_fof::GpuError& err) {
+  } catch (const grav_fof::GpuError& err) {
     return int(err.status);
   } catch (const std::bad_alloc&) {
     return int(cudaErrorMemoryAllocation);
@@ -3934,13 +3934,13 @@ extern "C" int compute_fof_so(const double* pos_xyz, const float* masses_or_null
     const int gn = std::clamp(int(std::cbrt(double(count) / 32.0)), 8, 128);
     const std::size_t ncells = std::size_t(gn) * std::size_t(gn) * std::size_t(gn);
 
-    swift_fof::check(cudaFree(nullptr));
+    grav_fof::check(cudaFree(nullptr));
     std::size_t free_mem = 0, total_mem = 0;
-    swift_fof::check(cudaMemGetInfo(&free_mem, &total_mem));
+    grav_fof::check(cudaMemGetInfo(&free_mem, &total_mem));
 
     const bool non_uniform = (masses_or_null != nullptr);
-    const bool force_chunk_grid = (std::getenv("SWIFT_FOF_SO_CHUNK_GRID") &&
-                                   std::atoi(std::getenv("SWIFT_FOF_SO_CHUNK_GRID")) != 0);
+    const bool force_chunk_grid = (std::getenv("GRAV_FOF_SO_CHUNK_GRID") &&
+                                   std::atoi(std::getenv("GRAV_FOF_SO_CHUNK_GRID")) != 0);
     const std::uint64_t resident_bytes = count * (non_uniform ? 28ULL : 24ULL) + std::uint64_t(ncells + 1) * 4ULL;
     const std::uint64_t sort_grid_bytes = count * (non_uniform ? 64ULL : 56ULL) + std::uint64_t(ncells + 1) * 4ULL;
 
@@ -3952,49 +3952,49 @@ extern "C" int compute_fof_so(const double* pos_xyz, const float* masses_or_null
     }
 
     // Step 1: Build spatially sorted particle buffers pos_s (+ mass_s) and cell_offsets on GPU
-    swift_fof::Buffer<double3> d_pos_s;
-    swift_fof::Buffer<float> d_mass_s;
-    swift_fof::Buffer<std::uint32_t> d_cell_offsets(ncells + 1);
-    swift_fof::Buffer<int> d_invalid(1);
-    swift_fof::check(cudaMemset(d_invalid.ptr, 0, sizeof(int)));
+    grav_fof::Buffer<double3> d_pos_s;
+    grav_fof::Buffer<float> d_mass_s;
+    grav_fof::Buffer<std::uint32_t> d_cell_offsets(ncells + 1);
+    grav_fof::Buffer<int> d_invalid(1);
+    grav_fof::check(cudaMemset(d_invalid.ptr, 0, sizeof(int)));
 
     if (!force_chunk_grid && count <= (1ULL << 30) &&
         sort_grid_bytes < std::uint64_t(0.70 * double(free_mem))) {
       const int cnt_i = static_cast<int>(count);
-      swift_fof::Buffer<double3> d_pos_raw(static_cast<std::size_t>(count));
-      swift_fof::check(cudaMemcpy(d_pos_raw.ptr, pos_xyz, static_cast<std::size_t>(count) * sizeof(double3),
+      grav_fof::Buffer<double3> d_pos_raw(static_cast<std::size_t>(count));
+      grav_fof::check(cudaMemcpy(d_pos_raw.ptr, pos_xyz, static_cast<std::size_t>(count) * sizeof(double3),
                                   cudaMemcpyHostToDevice));
-      swift_fof::Buffer<float> d_mass_raw(non_uniform ? static_cast<std::size_t>(count) : 0ULL);
+      grav_fof::Buffer<float> d_mass_raw(non_uniform ? static_cast<std::size_t>(count) : 0ULL);
       if (non_uniform) {
-        swift_fof::check(cudaMemcpy(d_mass_raw.ptr, masses_or_null, static_cast<std::size_t>(count) * sizeof(float),
+        grav_fof::check(cudaMemcpy(d_mass_raw.ptr, masses_or_null, static_cast<std::size_t>(count) * sizeof(float),
                                     cudaMemcpyHostToDevice));
       }
 
-      swift_fof::Buffer<std::uint32_t> d_cid_a(static_cast<std::size_t>(count));
-      swift_fof::Buffer<std::uint32_t> d_cid_b(static_cast<std::size_t>(count));
-      swift_fof::Buffer<std::uint32_t> d_pid_a(static_cast<std::size_t>(count));
-      swift_fof::Buffer<std::uint32_t> d_pid_b(static_cast<std::size_t>(count));
-      swift_fof::Buffer<std::uint32_t> d_cell_cnt(ncells);
-      swift_fof::check(cudaMemset(d_cell_cnt.ptr, 0, ncells * sizeof(std::uint32_t)));
+      grav_fof::Buffer<std::uint32_t> d_cid_a(static_cast<std::size_t>(count));
+      grav_fof::Buffer<std::uint32_t> d_cid_b(static_cast<std::size_t>(count));
+      grav_fof::Buffer<std::uint32_t> d_pid_a(static_cast<std::size_t>(count));
+      grav_fof::Buffer<std::uint32_t> d_pid_b(static_cast<std::size_t>(count));
+      grav_fof::Buffer<std::uint32_t> d_cell_cnt(ncells);
+      grav_fof::check(cudaMemset(d_cell_cnt.ptr, 0, ncells * sizeof(std::uint32_t)));
 
-      swift_fof::so_grid_key_kernel<<<swift_fof::grid_for_u64(count), swift_fof::threads>>>(
+      grav_fof::so_grid_key_kernel<<<grav_fof::grid_for_u64(count), grav_fof::threads>>>(
           d_pos_raw.ptr, non_uniform ? d_mass_raw.ptr : nullptr,
           static_cast<std::size_t>(count), gn, lx, ly, lz,
           d_cid_a.ptr, d_pid_a.ptr, d_cell_cnt.ptr, d_invalid.ptr);
       int bad = 0;
-      swift_fof::check(cudaMemcpy(&bad, d_invalid.ptr, sizeof(int), cudaMemcpyDeviceToHost));
+      grav_fof::check(cudaMemcpy(&bad, d_invalid.ptr, sizeof(int), cudaMemcpyDeviceToHost));
       if (bad) return int(cudaErrorInvalidValue);
 
       std::size_t scan_bytes = 0;
-      swift_fof::check(cub::DeviceScan::ExclusiveSum(
+      grav_fof::check(cub::DeviceScan::ExclusiveSum(
           nullptr, scan_bytes, d_cell_cnt.ptr, d_cell_offsets.ptr, int(ncells)));
       {
-        swift_fof::Buffer<unsigned char> work(scan_bytes);
-        swift_fof::check(cub::DeviceScan::ExclusiveSum(
+        grav_fof::Buffer<unsigned char> work(scan_bytes);
+        grav_fof::check(cub::DeviceScan::ExclusiveSum(
             work.ptr, scan_bytes, d_cell_cnt.ptr, d_cell_offsets.ptr, int(ncells)));
       }
       const std::uint32_t total_u32 = static_cast<std::uint32_t>(count);
-      swift_fof::check(cudaMemcpy(d_cell_offsets.ptr + ncells, &total_u32, sizeof(std::uint32_t),
+      grav_fof::check(cudaMemcpy(d_cell_offsets.ptr + ncells, &total_u32, sizeof(std::uint32_t),
                                   cudaMemcpyHostToDevice));
       d_cell_cnt.release();
 
@@ -4006,73 +4006,73 @@ extern "C" int compute_fof_so(const double* pos_xyz, const float* masses_or_null
       cub::DoubleBuffer<std::uint32_t> cids(d_cid_a.ptr, d_cid_b.ptr);
       cub::DoubleBuffer<std::uint32_t> pids(d_pid_a.ptr, d_pid_b.ptr);
       std::size_t sort_bytes = 0;
-      swift_fof::check(cub::DeviceRadixSort::SortPairs(nullptr, sort_bytes, cids, pids, cnt_i, 0, bits));
+      grav_fof::check(cub::DeviceRadixSort::SortPairs(nullptr, sort_bytes, cids, pids, cnt_i, 0, bits));
       {
-        swift_fof::Buffer<unsigned char> work(sort_bytes);
-        swift_fof::check(cub::DeviceRadixSort::SortPairs(work.ptr, sort_bytes, cids, pids, cnt_i, 0, bits));
+        grav_fof::Buffer<unsigned char> work(sort_bytes);
+        grav_fof::check(cub::DeviceRadixSort::SortPairs(work.ptr, sort_bytes, cids, pids, cnt_i, 0, bits));
       }
       d_cid_a.release();
       d_cid_b.release();
       d_pid_a.keep_only(pids.Current());
       d_pid_b.keep_only(pids.Current());
 
-      d_pos_s = swift_fof::Buffer<double3>(static_cast<std::size_t>(count));
-      if (non_uniform) d_mass_s = swift_fof::Buffer<float>(static_cast<std::size_t>(count));
-      swift_fof::so_gather_sorted_kernel<<<swift_fof::grid_for_u64(count), swift_fof::threads>>>(
+      d_pos_s = grav_fof::Buffer<double3>(static_cast<std::size_t>(count));
+      if (non_uniform) d_mass_s = grav_fof::Buffer<float>(static_cast<std::size_t>(count));
+      grav_fof::so_gather_sorted_kernel<<<grav_fof::grid_for_u64(count), grav_fof::threads>>>(
           d_pos_raw.ptr, non_uniform ? d_mass_raw.ptr : nullptr,
           pids.Current(), static_cast<std::size_t>(count),
           d_pos_s.ptr, non_uniform ? d_mass_s.ptr : nullptr);
-      swift_fof::check(cudaDeviceSynchronize());
+      grav_fof::check(cudaDeviceSynchronize());
     } else {
       // Low-VRAM chunked 2-pass spatial histogram + scatter (handles up to 1024^3 in 48 GB VRAM)
       const std::uint64_t gchunk = std::min<std::uint64_t>(count, 16ULL << 20);
-      swift_fof::Buffer<double3> d_cpos(static_cast<std::size_t>(gchunk));
-      swift_fof::Buffer<float> d_cmass(non_uniform ? static_cast<std::size_t>(gchunk) : 0ULL);
-      swift_fof::Buffer<std::uint32_t> d_cell_cnt(ncells);
-      swift_fof::check(cudaMemset(d_cell_cnt.ptr, 0, ncells * sizeof(std::uint32_t)));
+      grav_fof::Buffer<double3> d_cpos(static_cast<std::size_t>(gchunk));
+      grav_fof::Buffer<float> d_cmass(non_uniform ? static_cast<std::size_t>(gchunk) : 0ULL);
+      grav_fof::Buffer<std::uint32_t> d_cell_cnt(ncells);
+      grav_fof::check(cudaMemset(d_cell_cnt.ptr, 0, ncells * sizeof(std::uint32_t)));
 
       for (std::uint64_t base = 0; base < count; base += gchunk) {
         const std::size_t cur = static_cast<std::size_t>(std::min<std::uint64_t>(gchunk, count - base));
-        swift_fof::check(cudaMemcpy(d_cpos.ptr, pos_xyz + base * 3ULL, cur * sizeof(double3), cudaMemcpyHostToDevice));
+        grav_fof::check(cudaMemcpy(d_cpos.ptr, pos_xyz + base * 3ULL, cur * sizeof(double3), cudaMemcpyHostToDevice));
         if (non_uniform) {
-          swift_fof::check(cudaMemcpy(d_cmass.ptr, masses_or_null + base, cur * sizeof(float), cudaMemcpyHostToDevice));
+          grav_fof::check(cudaMemcpy(d_cmass.ptr, masses_or_null + base, cur * sizeof(float), cudaMemcpyHostToDevice));
         }
-        swift_fof::so_grid_chunk_count_kernel<<<swift_fof::grid_for_u64(cur), swift_fof::threads>>>(
+        grav_fof::so_grid_chunk_count_kernel<<<grav_fof::grid_for_u64(cur), grav_fof::threads>>>(
             d_cpos.ptr, non_uniform ? d_cmass.ptr : nullptr, cur, gn, lx, ly, lz,
             d_cell_cnt.ptr, d_invalid.ptr);
       }
       int bad = 0;
-      swift_fof::check(cudaMemcpy(&bad, d_invalid.ptr, sizeof(int), cudaMemcpyDeviceToHost));
+      grav_fof::check(cudaMemcpy(&bad, d_invalid.ptr, sizeof(int), cudaMemcpyDeviceToHost));
       if (bad) return int(cudaErrorInvalidValue);
 
       std::size_t scan_bytes = 0;
-      swift_fof::check(cub::DeviceScan::ExclusiveSum(
+      grav_fof::check(cub::DeviceScan::ExclusiveSum(
           nullptr, scan_bytes, d_cell_cnt.ptr, d_cell_offsets.ptr, int(ncells)));
       {
-        swift_fof::Buffer<unsigned char> work(scan_bytes);
-        swift_fof::check(cub::DeviceScan::ExclusiveSum(
+        grav_fof::Buffer<unsigned char> work(scan_bytes);
+        grav_fof::check(cub::DeviceScan::ExclusiveSum(
             work.ptr, scan_bytes, d_cell_cnt.ptr, d_cell_offsets.ptr, int(ncells)));
       }
       const std::uint32_t total_u32 = static_cast<std::uint32_t>(count);
-      swift_fof::check(cudaMemcpy(d_cell_offsets.ptr + ncells, &total_u32, sizeof(std::uint32_t),
+      grav_fof::check(cudaMemcpy(d_cell_offsets.ptr + ncells, &total_u32, sizeof(std::uint32_t),
                                   cudaMemcpyHostToDevice));
-      swift_fof::check(cudaMemcpy(d_cell_cnt.ptr, d_cell_offsets.ptr, ncells * sizeof(std::uint32_t),
+      grav_fof::check(cudaMemcpy(d_cell_cnt.ptr, d_cell_offsets.ptr, ncells * sizeof(std::uint32_t),
                                   cudaMemcpyDeviceToDevice));
 
-      d_pos_s = swift_fof::Buffer<double3>(static_cast<std::size_t>(count));
-      if (non_uniform) d_mass_s = swift_fof::Buffer<float>(static_cast<std::size_t>(count));
+      d_pos_s = grav_fof::Buffer<double3>(static_cast<std::size_t>(count));
+      if (non_uniform) d_mass_s = grav_fof::Buffer<float>(static_cast<std::size_t>(count));
 
       for (std::uint64_t base = 0; base < count; base += gchunk) {
         const std::size_t cur = static_cast<std::size_t>(std::min<std::uint64_t>(gchunk, count - base));
-        swift_fof::check(cudaMemcpy(d_cpos.ptr, pos_xyz + base * 3ULL, cur * sizeof(double3), cudaMemcpyHostToDevice));
+        grav_fof::check(cudaMemcpy(d_cpos.ptr, pos_xyz + base * 3ULL, cur * sizeof(double3), cudaMemcpyHostToDevice));
         if (non_uniform) {
-          swift_fof::check(cudaMemcpy(d_cmass.ptr, masses_or_null + base, cur * sizeof(float), cudaMemcpyHostToDevice));
+          grav_fof::check(cudaMemcpy(d_cmass.ptr, masses_or_null + base, cur * sizeof(float), cudaMemcpyHostToDevice));
         }
-        swift_fof::so_grid_chunk_scatter_kernel<<<swift_fof::grid_for_u64(cur), swift_fof::threads>>>(
+        grav_fof::so_grid_chunk_scatter_kernel<<<grav_fof::grid_for_u64(cur), grav_fof::threads>>>(
             d_cpos.ptr, non_uniform ? d_cmass.ptr : nullptr, cur, gn, lx, ly, lz,
             d_cell_cnt.ptr, d_pos_s.ptr, non_uniform ? d_mass_s.ptr : nullptr);
       }
-      swift_fof::check(cudaDeviceSynchronize());
+      grav_fof::check(cudaDeviceSynchronize());
     }
     d_invalid.release();
 
@@ -4081,7 +4081,7 @@ extern "C" int compute_fof_so(const double* pos_xyz, const float* masses_or_null
     const double cw_x = lx / double(gn);
     const double cw_y = ly / double(gn);
     const double cw_z = lz / double(gn);
-    const swift_fof::SoGridParams gp{gn, lx, ly, lz, cw_x, cw_y, cw_z, thresh_c, thresh_m, uniform_mass};
+    const grav_fof::SoGridParams gp{gn, lx, ly, lz, cw_x, cw_y, cw_z, thresh_c, thresh_m, uniform_mass};
 
     // Build initial active halo list
     std::vector<std::size_t> act_hidx;
@@ -4115,7 +4115,7 @@ extern "C" int compute_fof_so(const double* pos_xyz, const float* masses_or_null
 
       for (int a = 0; a < n_act; ++a) {
         int dx0, dx1, dy0, dy1, dz0, dz1;
-        swift_fof::so_halo_span(gn, cw_x, cw_y, cw_z, act_rcap[a],
+        grav_fof::so_halo_span(gn, cw_x, cw_y, cw_z, act_rcap[a],
                                 &dx0, &dx1, &dy0, &dy1, &dz0, &dz1);
         const std::uint64_t nv = std::uint64_t(dx1 - dx0 + 1) *
                                  std::uint64_t(dy1 - dy0 + 1) *
@@ -4128,43 +4128,43 @@ extern "C" int compute_fof_so(const double* pos_xyz, const float* masses_or_null
         }
       }
 
-      swift_fof::Buffer<double3> d_hpos(n_act);
-      swift_fof::Buffer<double> d_hrcap(n_act);
-      swift_fof::Buffer<std::uint32_t> d_hcnt(n_act);
-      swift_fof::check(cudaMemcpy(d_hpos.ptr, act_pos.data(), std::size_t(n_act) * sizeof(double3), cudaMemcpyHostToDevice));
-      swift_fof::check(cudaMemcpy(d_hrcap.ptr, act_rcap.data(), std::size_t(n_act) * sizeof(double), cudaMemcpyHostToDevice));
+      grav_fof::Buffer<double3> d_hpos(n_act);
+      grav_fof::Buffer<double> d_hrcap(n_act);
+      grav_fof::Buffer<std::uint32_t> d_hcnt(n_act);
+      grav_fof::check(cudaMemcpy(d_hpos.ptr, act_pos.data(), std::size_t(n_act) * sizeof(double3), cudaMemcpyHostToDevice));
+      grav_fof::check(cudaMemcpy(d_hrcap.ptr, act_rcap.data(), std::size_t(n_act) * sizeof(double), cudaMemcpyHostToDevice));
 
       // Pass A: Count exact enclosed pairs per active halo
       if (!light_ids.empty()) {
         const int nl = static_cast<int>(light_ids.size());
-        swift_fof::Buffer<int> d_lids(nl);
-        swift_fof::check(cudaMemcpy(d_lids.ptr, light_ids.data(), std::size_t(nl) * sizeof(int), cudaMemcpyHostToDevice));
-        const int warps_per_blk = swift_fof::threads / 32;
+        grav_fof::Buffer<int> d_lids(nl);
+        grav_fof::check(cudaMemcpy(d_lids.ptr, light_ids.data(), std::size_t(nl) * sizeof(int), cudaMemcpyHostToDevice));
+        const int warps_per_blk = grav_fof::threads / 32;
         const int nblks = (nl + warps_per_blk - 1) / warps_per_blk;
-        swift_fof::so_count_light_kernel<<<nblks, swift_fof::threads>>>(
+        grav_fof::so_count_light_kernel<<<nblks, grav_fof::threads>>>(
             d_pos_s.ptr, d_cell_offsets.ptr, gp, d_lids.ptr, nl,
             d_hpos.ptr, d_hrcap.ptr, d_hcnt.ptr);
       }
       if (!heavy_ids.empty()) {
         const int nh = static_cast<int>(heavy_ids.size());
-        swift_fof::Buffer<int> d_hids(nh);
-        swift_fof::check(cudaMemcpy(d_hids.ptr, heavy_ids.data(), std::size_t(nh) * sizeof(int), cudaMemcpyHostToDevice));
-        swift_fof::so_count_heavy_kernel<<<nh, swift_fof::threads>>>(
+        grav_fof::Buffer<int> d_hids(nh);
+        grav_fof::check(cudaMemcpy(d_hids.ptr, heavy_ids.data(), std::size_t(nh) * sizeof(int), cudaMemcpyHostToDevice));
+        grav_fof::so_count_heavy_kernel<<<nh, grav_fof::threads>>>(
             d_pos_s.ptr, d_cell_offsets.ptr, gp, d_hids.ptr, nh,
             d_hpos.ptr, d_hrcap.ptr, d_hcnt.ptr);
       }
-      swift_fof::check(cudaGetLastError());
+      grav_fof::check(cudaGetLastError());
 
       std::vector<std::uint32_t> h_cnt(n_act);
-      swift_fof::check(cudaMemcpy(h_cnt.data(), d_hcnt.ptr, std::size_t(n_act) * sizeof(std::uint32_t), cudaMemcpyDeviceToHost));
+      grav_fof::check(cudaMemcpy(h_cnt.data(), d_hcnt.ptr, std::size_t(n_act) * sizeof(std::uint32_t), cudaMemcpyDeviceToHost));
       d_hcnt.release();
 
       std::size_t cur_free = 0, cur_total = 0;
-      swift_fof::check(cudaMemGetInfo(&cur_free, &cur_total));
+      grav_fof::check(cudaMemGetInfo(&cur_free, &cur_total));
       std::uint64_t max_batch_pairs = std::min<std::uint64_t>(
           64ULL << 20,
           std::max<std::uint64_t>(1ULL << 20, cur_free / (non_uniform ? 64ULL : 48ULL)));
-      if (const char* env_b = std::getenv("SWIFT_FOF_SO_BATCH_PAIRS")) {
+      if (const char* env_b = std::getenv("GRAV_FOF_SO_BATCH_PAIRS")) {
         const std::uint64_t vb = std::strtoull(env_b, nullptr, 10);
         if (vb > 0ULL) max_batch_pairs = vb;
       }
@@ -4202,71 +4202,71 @@ extern "C" int compute_fof_so(const double* pos_xyz, const float* masses_or_null
             else b_light.push_back(bi);
           }
 
-          swift_fof::Buffer<int> d_off(batch_H + 1);
-          swift_fof::check(cudaMemcpy(d_off.ptr, h_off.data(), std::size_t(batch_H + 1) * sizeof(int), cudaMemcpyHostToDevice));
-          swift_fof::Buffer<int> d_blight, d_bheavy;
+          grav_fof::Buffer<int> d_off(batch_H + 1);
+          grav_fof::check(cudaMemcpy(d_off.ptr, h_off.data(), std::size_t(batch_H + 1) * sizeof(int), cudaMemcpyHostToDevice));
+          grav_fof::Buffer<int> d_blight, d_bheavy;
           if (!b_light.empty()) {
-            d_blight = swift_fof::Buffer<int>(b_light.size());
-            swift_fof::check(cudaMemcpy(d_blight.ptr, b_light.data(), b_light.size() * sizeof(int), cudaMemcpyHostToDevice));
+            d_blight = grav_fof::Buffer<int>(b_light.size());
+            grav_fof::check(cudaMemcpy(d_blight.ptr, b_light.data(), b_light.size() * sizeof(int), cudaMemcpyHostToDevice));
           }
           if (!b_heavy.empty()) {
-            d_bheavy = swift_fof::Buffer<int>(b_heavy.size());
-            swift_fof::check(cudaMemcpy(d_bheavy.ptr, b_heavy.data(), b_heavy.size() * sizeof(int), cudaMemcpyHostToDevice));
+            d_bheavy = grav_fof::Buffer<int>(b_heavy.size());
+            grav_fof::check(cudaMemcpy(d_bheavy.ptr, b_heavy.data(), b_heavy.size() * sizeof(int), cudaMemcpyHostToDevice));
           }
 
           const std::size_t bK_sz = static_cast<std::size_t>(batch_K);
-          swift_fof::Buffer<double> d_r2_in(bK_sz), d_r2_out(bK_sz);
-          swift_fof::Buffer<float> d_m_in(non_uniform ? bK_sz : 0ULL);
-          swift_fof::Buffer<float> d_m_out(non_uniform ? bK_sz : 0ULL);
+          grav_fof::Buffer<double> d_r2_in(bK_sz), d_r2_out(bK_sz);
+          grav_fof::Buffer<float> d_m_in(non_uniform ? bK_sz : 0ULL);
+          grav_fof::Buffer<float> d_m_out(non_uniform ? bK_sz : 0ULL);
 
           // Pass B: Fill exact radial arrays
           if (!b_light.empty()) {
             const int nl = static_cast<int>(b_light.size());
-            const int warps_per_blk = swift_fof::threads / 32;
+            const int warps_per_blk = grav_fof::threads / 32;
             const int nblks = (nl + warps_per_blk - 1) / warps_per_blk;
-            swift_fof::so_fill_light_kernel<<<nblks, swift_fof::threads>>>(
+            grav_fof::so_fill_light_kernel<<<nblks, grav_fof::threads>>>(
                 d_pos_s.ptr, non_uniform ? d_mass_s.ptr : nullptr, d_cell_offsets.ptr, gp,
                 d_blight.ptr, nl, b_beg, d_hpos.ptr, d_hrcap.ptr, d_off.ptr,
                 d_r2_in.ptr, non_uniform ? d_m_in.ptr : nullptr);
           }
           if (!b_heavy.empty()) {
             const int nh = static_cast<int>(b_heavy.size());
-            swift_fof::so_fill_heavy_kernel<<<nh, swift_fof::threads>>>(
+            grav_fof::so_fill_heavy_kernel<<<nh, grav_fof::threads>>>(
                 d_pos_s.ptr, non_uniform ? d_mass_s.ptr : nullptr, d_cell_offsets.ptr, gp,
                 d_bheavy.ptr, nh, b_beg, d_hpos.ptr, d_hrcap.ptr, d_off.ptr,
                 d_r2_in.ptr, non_uniform ? d_m_in.ptr : nullptr);
           }
-          swift_fof::check(cudaGetLastError());
+          grav_fof::check(cudaGetLastError());
 
           // Pass C: Exact per-halo ascending sort of r2 (and paired mass if non-uniform)
           const int K_int = static_cast<int>(batch_K);
           std::size_t sort_bytes = 0;
           if (!non_uniform) {
             if (batch_H == 1) {
-              swift_fof::check(cub::DeviceRadixSort::SortKeys(
+              grav_fof::check(cub::DeviceRadixSort::SortKeys(
                   nullptr, sort_bytes, d_r2_in.ptr, d_r2_out.ptr, K_int));
-              swift_fof::Buffer<unsigned char> work(sort_bytes);
-              swift_fof::check(cub::DeviceRadixSort::SortKeys(
+              grav_fof::Buffer<unsigned char> work(sort_bytes);
+              grav_fof::check(cub::DeviceRadixSort::SortKeys(
                   work.ptr, sort_bytes, d_r2_in.ptr, d_r2_out.ptr, K_int));
             } else {
-              swift_fof::check(cub::DeviceSegmentedRadixSort::SortKeys(
+              grav_fof::check(cub::DeviceSegmentedRadixSort::SortKeys(
                   nullptr, sort_bytes, d_r2_in.ptr, d_r2_out.ptr, K_int, batch_H, d_off.ptr, d_off.ptr + 1));
-              swift_fof::Buffer<unsigned char> work(sort_bytes);
-              swift_fof::check(cub::DeviceSegmentedRadixSort::SortKeys(
+              grav_fof::Buffer<unsigned char> work(sort_bytes);
+              grav_fof::check(cub::DeviceSegmentedRadixSort::SortKeys(
                   work.ptr, sort_bytes, d_r2_in.ptr, d_r2_out.ptr, K_int, batch_H, d_off.ptr, d_off.ptr + 1));
             }
           } else {
             if (batch_H == 1) {
-              swift_fof::check(cub::DeviceRadixSort::SortPairs(
+              grav_fof::check(cub::DeviceRadixSort::SortPairs(
                   nullptr, sort_bytes, d_r2_in.ptr, d_r2_out.ptr, d_m_in.ptr, d_m_out.ptr, K_int));
-              swift_fof::Buffer<unsigned char> work(sort_bytes);
-              swift_fof::check(cub::DeviceRadixSort::SortPairs(
+              grav_fof::Buffer<unsigned char> work(sort_bytes);
+              grav_fof::check(cub::DeviceRadixSort::SortPairs(
                   work.ptr, sort_bytes, d_r2_in.ptr, d_r2_out.ptr, d_m_in.ptr, d_m_out.ptr, K_int));
             } else {
-              swift_fof::check(cub::DeviceSegmentedRadixSort::SortPairs(
+              grav_fof::check(cub::DeviceSegmentedRadixSort::SortPairs(
                   nullptr, sort_bytes, d_r2_in.ptr, d_r2_out.ptr, d_m_in.ptr, d_m_out.ptr, K_int, batch_H, d_off.ptr, d_off.ptr + 1));
-              swift_fof::Buffer<unsigned char> work(sort_bytes);
-              swift_fof::check(cub::DeviceSegmentedRadixSort::SortPairs(
+              grav_fof::Buffer<unsigned char> work(sort_bytes);
+              grav_fof::check(cub::DeviceSegmentedRadixSort::SortPairs(
                   work.ptr, sort_bytes, d_r2_in.ptr, d_r2_out.ptr, d_m_in.ptr, d_m_out.ptr, K_int, batch_H, d_off.ptr, d_off.ptr + 1));
             }
           }
@@ -4274,37 +4274,37 @@ extern "C" int compute_fof_so(const double* pos_xyz, const float* masses_or_null
           d_m_in.release();
 
           // Pass D: Exact enclosed-density + log-log interpolation solver
-          swift_fof::Buffer<FofSoRow> d_bso(batch_H);
-          swift_fof::Buffer<unsigned char> d_bsat(batch_H);
+          grav_fof::Buffer<FofSoRow> d_bso(batch_H);
+          grav_fof::Buffer<unsigned char> d_bsat(batch_H);
           if (!non_uniform) {
             if (!b_light.empty()) {
               const int nl = static_cast<int>(b_light.size());
-              const int warps_per_blk = swift_fof::threads / 32;
+              const int warps_per_blk = grav_fof::threads / 32;
               const int nblks = (nl + warps_per_blk - 1) / warps_per_blk;
-              swift_fof::so_solve_uniform_light_kernel<<<nblks, swift_fof::threads>>>(
+              grav_fof::so_solve_uniform_light_kernel<<<nblks, grav_fof::threads>>>(
                   d_r2_out.ptr, d_off.ptr, d_blight.ptr, nl, gp, d_bso.ptr, d_bsat.ptr);
             }
             if (!b_heavy.empty()) {
               const int nh = static_cast<int>(b_heavy.size());
-              swift_fof::so_solve_uniform_heavy_kernel<<<nh, swift_fof::threads>>>(
+              grav_fof::so_solve_uniform_heavy_kernel<<<nh, grav_fof::threads>>>(
                   d_r2_out.ptr, d_off.ptr, d_bheavy.ptr, nh, gp, d_bso.ptr, d_bsat.ptr);
             }
           } else {
             if (!b_light.empty()) {
               const int nl = static_cast<int>(b_light.size());
-              const int warps_per_blk = swift_fof::threads / 32;
+              const int warps_per_blk = grav_fof::threads / 32;
               const int nblks = (nl + warps_per_blk - 1) / warps_per_blk;
-              swift_fof::so_solve_nonuniform_light_kernel<<<nblks, swift_fof::threads>>>(
+              grav_fof::so_solve_nonuniform_light_kernel<<<nblks, grav_fof::threads>>>(
                   d_r2_out.ptr, d_m_out.ptr, d_off.ptr, d_blight.ptr, nl, gp, d_bso.ptr, d_bsat.ptr);
             }
             if (!b_heavy.empty()) {
               const int nh = static_cast<int>(b_heavy.size());
-              swift_fof::so_solve_nonuniform_heavy_kernel<<<nh, swift_fof::threads>>>(
+              grav_fof::so_solve_nonuniform_heavy_kernel<<<nh, grav_fof::threads>>>(
                   d_r2_out.ptr, d_m_out.ptr, d_off.ptr, d_bheavy.ptr, nh, gp, d_bso.ptr, d_bsat.ptr);
             }
           }
-          swift_fof::check(cudaMemcpy(batch_so.data(), d_bso.ptr, std::size_t(batch_H) * sizeof(FofSoRow), cudaMemcpyDeviceToHost));
-          swift_fof::check(cudaMemcpy(batch_sat.data(), d_bsat.ptr, std::size_t(batch_H) * sizeof(unsigned char), cudaMemcpyDeviceToHost));
+          grav_fof::check(cudaMemcpy(batch_so.data(), d_bso.ptr, std::size_t(batch_H) * sizeof(FofSoRow), cudaMemcpyDeviceToHost));
+          grav_fof::check(cudaMemcpy(batch_sat.data(), d_bsat.ptr, std::size_t(batch_H) * sizeof(unsigned char), cudaMemcpyDeviceToHost));
         }
 
         for (int bi = 0; bi < batch_H; ++bi) {
@@ -4325,7 +4325,7 @@ extern "C" int compute_fof_so(const double* pos_xyz, const float* masses_or_null
     }
 
     return 0;
-  } catch (const swift_fof::GpuError& err) {
+  } catch (const grav_fof::GpuError& err) {
     return int(err.status);
   } catch (const std::bad_alloc&) {
     return int(cudaErrorMemoryAllocation);

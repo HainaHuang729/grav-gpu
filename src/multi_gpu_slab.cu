@@ -26,17 +26,17 @@
 #include <cub/cub.cuh>
 #include <omp.h>
 
-#include "swift_cuda_pm.h"
-#include "swift_cuda_pm_dist.h"
-#include "swift_cuda_fof.h"
-#include "swift_domain_3d.h"
+#include "grav_cuda_pm.h"
+#include "grav_cuda_pm_dist.h"
+#include "grav_cuda_fof.h"
+#include "grav_domain_3d.h"
 #include "validated_device_tree.cuh"
 #include "gpu_gravity_functions.cuh"
-#ifdef SWIFT_FAST_M2P_EXP
+#ifdef GRAV_FAST_M2P_EXP
 #define expf __expf
 #endif
 #include "m2p_native_math.cuh"
-#ifdef SWIFT_FAST_M2P_EXP
+#ifdef GRAV_FAST_M2P_EXP
 #undef expf
 #endif
 #undef min
@@ -421,7 +421,7 @@ __global__ void __launch_bounds__(team, 4) tree_force_warp_slab(
               rad2 < r2 && 8.f * source.m.power[2] < p.mac_tolerance * old * r2 * r2);
           if (accept) {
             reduced_grav_tensor contribution{};
-            swift_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 1, inv_split, &contribution);
+            grav_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 1, inv_split, &contribution);
             result.x += contribution.F_100; result.y += contribution.F_010;
             result.z += contribution.F_001; result.w += contribution.F_000;
             node = st.escape[node];
@@ -519,9 +519,9 @@ __global__ void __launch_bounds__(team, 4) tree_force_warp_slab(
       const float r2m = norm2(dm);
       const float softm = fmaxf(warp_soft, src.m.max_softening);
       potential_derivatives_M2L deriv;
-      swift_cuda_potential_derivatives_compute_M2L(
+      grav_cuda_potential_derivatives_compute_M2L(
           dm.x, dm.y, dm.z, r2m, rsqrtf(r2m), softm, 1, inv_split, &deriv);
-      swift_cuda_gravity_M2L_apply(&lf, &src.m, &deriv);
+      grav_cuda_gravity_M2L_apply(&lf, &src.m, &deriv);
     }
     float* lfp = reinterpret_cast<float*>(&lf);
     float* sfp = reinterpret_cast<float*>(&s_field[warp_id]);
@@ -604,7 +604,7 @@ __global__ void __launch_bounds__(team, 4) tree_force_warp_slab(
             rad2 < r2 && 8.f * source.m.power[2] < p.mac_tolerance * old * r2 * r2);
         if (accept) {
           reduced_grav_tensor contribution{};
-          swift_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 1, inv_split, &contribution);
+          grav_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 1, inv_split, &contribution);
           result.x += contribution.F_100; result.y += contribution.F_010;
           result.z += contribution.F_001; result.w += contribution.F_000;
         }
@@ -822,7 +822,7 @@ __device__ __forceinline__ void gravity_M2P_periodic_fast(
   const float r_inv = rsqrtf(r2);
   const float r = r2 * r_inv;
   struct chi_derivatives derivs;
-  swift_cuda_kernel_long_grav_derivatives(r, inv_split, &derivs);
+  grav_cuda_kernel_long_grav_derivatives(r, inv_split, &derivs);
 
   const float c0r = derivs.chi_0 * r_inv;
   const float Dt_1 = c0r;
@@ -1528,7 +1528,7 @@ __global__ void __launch_bounds__(team, 4) eval_m2l_split_kernel(
       const float r2m = norm2(dm);
       const float softm = fmaxf(meta.warp_soft, nm.max_softening);
       potential_derivatives_M2L deriv;
-      swift_cuda_potential_derivatives_compute_M2L(
+      grav_cuda_potential_derivatives_compute_M2L(
           dm.x, dm.y, dm.z, r2m, rsqrtf(r2m), softm, 1, inv_split, &deriv);
       gravity_M2L_apply_compact(&lf, st_cm + u, &deriv);
     }
@@ -2142,7 +2142,7 @@ __global__ void __launch_bounds__(team, 4) tree_force_warp_isolated(
               rad2 < r2 && 8.f * source.m.power[2] < p.mac_tolerance * old * r2 * r2);
           if (accept) {
             reduced_grav_tensor contribution{};
-            swift_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 0, 0.f, &contribution);
+            grav_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 0, 0.f, &contribution);
             result.x += contribution.F_100; result.y += contribution.F_010;
             result.z += contribution.F_001; result.w += contribution.F_000;
             node = st.escape[node];
@@ -2223,9 +2223,9 @@ __global__ void __launch_bounds__(team, 4) tree_force_warp_isolated(
       const float r2m = norm2(dm);
       const float softm = fmaxf(warp_soft, src.m.max_softening);
       potential_derivatives_M2L deriv;
-      swift_cuda_potential_derivatives_compute_M2L(
+      grav_cuda_potential_derivatives_compute_M2L(
           dm.x, dm.y, dm.z, r2m, rsqrtf(r2m), softm, 0, 0.f, &deriv);
-      swift_cuda_gravity_M2L_apply(&lf, &src.m, &deriv);
+      grav_cuda_gravity_M2L_apply(&lf, &src.m, &deriv);
     }
     float* lfp = reinterpret_cast<float*>(&lf);
     float* sfp = reinterpret_cast<float*>(&s_field[warp_id]);
@@ -2303,7 +2303,7 @@ __global__ void __launch_bounds__(team, 4) tree_force_warp_isolated(
             rad2 < r2 && 8.f * source.m.power[2] < p.mac_tolerance * old * r2 * r2);
         if (accept) {
           reduced_grav_tensor contribution{};
-          swift_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 0, 0.f, &contribution);
+          grav_cuda_gravity_M2P(&source.m, d.x, d.y, d.z, r2, soft, 0, 0.f, &contribution);
           result.x += contribution.F_100; result.y += contribution.F_010;
           result.z += contribution.F_001; result.w += contribution.F_000;
         }
@@ -3509,7 +3509,7 @@ __global__ void gather_fc_samples_kernel(
   if (out_mesh && d_mesh_acc) out_mesh[dst_off + k] = d_mesh_acc[lid];
 }
 
-#include "swift_domain_3d_engine.cuh"
+#include "grav_domain_3d_engine.cuh"
 
 int main(int argc, char** argv) {
   if (argc != 4) {
@@ -3521,19 +3521,19 @@ int main(int argc, char** argv) {
 
     int dev_count = 0;
     check(cudaGetDeviceCount(&dev_count));
-    const char* ngpu_env = std::getenv("SWIFT_NUM_GPUS");
+    const char* ngpu_env = std::getenv("GRAV_NUM_GPUS");
     const int num_gpus = ngpu_env ? std::stoi(ngpu_env) : dev_count;
     if (num_gpus <= 0 || num_gpus > dev_count || num_gpus > num_slabs) {
-      throw std::runtime_error("Invalid SWIFT_NUM_GPUS=" + std::to_string(num_gpus) +
+      throw std::runtime_error("Invalid GRAV_NUM_GPUS=" + std::to_string(num_gpus) +
                                " (dev_count=" + std::to_string(dev_count) + ")");
     }
 
-    const char* periodic_env = std::getenv("SWIFT_PERIODIC");
-    const char* comoving_env = std::getenv("SWIFT_COMOVING");
+    const char* periodic_env = std::getenv("GRAV_PERIODIC");
+    const char* comoving_env = std::getenv("GRAV_COMOVING");
     const bool periodic = !periodic_env || std::string(periodic_env) != "0";
     const bool comoving = comoving_env ? (std::string(comoving_env) != "0") : periodic;
     if (!periodic && num_gpus > 1) {
-      throw std::runtime_error("SWIFT_PERIODIC=0 (isolated mode) currently requires SWIFT_NUM_GPUS=1");
+      throw std::runtime_error("GRAV_PERIODIC=0 (isolated mode) currently requires GRAV_NUM_GPUS=1");
     }
 
     FILE* input = fopen(argv[1], "rb");
@@ -3546,88 +3546,88 @@ int main(int argc, char** argv) {
     const double a_end = std::stod(argv[3]);
     if (!(a_end > h.initial_scale)) return 3;
 
-    const bool dynamic_pm = periodic && (std::getenv("SWIFT_DYNAMIC_PM") != nullptr);
-    const char* requested_pm = std::getenv("SWIFT_PM_INTERVALS");
+    const bool dynamic_pm = periodic && (std::getenv("GRAV_DYNAMIC_PM") != nullptr);
+    const char* requested_pm = std::getenv("GRAV_PM_INTERVALS");
     const int pm_intervals = requested_pm ? std::stoi(requested_pm) : (dynamic_pm ? 16 : 1);
     if (pm_intervals <= 0 || pm_intervals > 4096 || (pm_intervals & (pm_intervals - 1)))
-      throw std::runtime_error("SWIFT_PM_INTERVALS must be a power of two between 1 and 4096");
-    const char* requested_short = std::getenv("SWIFT_SHORT_CAP_INTERVALS");
+      throw std::runtime_error("GRAV_PM_INTERVALS must be a power of two between 1 and 4096");
+    const char* requested_short = std::getenv("GRAV_SHORT_CAP_INTERVALS");
     const int short_intervals = requested_short ? std::stoi(requested_short) : pm_intervals;
     if (short_intervals < pm_intervals || short_intervals > 4096 ||
         (short_intervals & (short_intervals - 1)))
-      throw std::runtime_error("Invalid SWIFT_SHORT_CAP_INTERVALS");
+      throw std::runtime_error("Invalid GRAV_SHORT_CAP_INTERVALS");
 
-    const char* requested_step = std::getenv("SWIFT_SHORT_STEP_FACTOR");
-    const char* requested_mac = std::getenv("SWIFT_MAC_TOLERANCE");
-    const char* requested_g = std::getenv("SWIFT_GRAV_G");
-    const char* requested_dt_max = std::getenv("SWIFT_DT_MAX");
-    const char* requested_rms_fac = std::getenv("SWIFT_MAX_DT_RMS_FACTOR");
-    const char* leaf_override = std::getenv("SWIFT_LEAF_LIMIT");
-    const char* m2l_env = std::getenv("SWIFT_WARP_M2L");
-    const char* fsplit_env = std::getenv("SWIFT_FAST_SPLIT");
-    const char* lazy_env = std::getenv("SWIFT_LAZY_TREE");
-    const char* split_force_env = std::getenv("SWIFT_SPLIT_FORCE");
-    const char* split_batch_env = std::getenv("SWIFT_SPLIT_BATCH_WARPS");
-    const char* pm_dist_env = std::getenv("SWIFT_PM_DIST");
-    const char* domain_mode_env = std::getenv("SWIFT_DOMAIN_MODE");
-    const char* rebal_interval_env = std::getenv("SWIFT_REBALANCE_INTERVAL");
-    const char* rebal_min_gain_env = std::getenv("SWIFT_REBALANCE_MIN_GAIN");
-    const char* force0_out_path = std::getenv("SWIFT_FORCE0_OUT");
-    const char* lazy_max_env = std::getenv("SWIFT_LAZY_TREE_MAX_STEPS");
-    const char* lazy_disp_env = std::getenv("SWIFT_LAZY_TREE_DISP_FRAC");
-    const char* lazy_act_env = std::getenv("SWIFT_LAZY_TREE_ACTIVE_FRAC");
-    const char* skip_out_env = std::getenv("SWIFT_SKIP_OUTPUT_WRITE");
-    const char* force_comp_path = std::getenv("SWIFT_FORCE_COMPONENTS");
-    const char* force3_out_path = std::getenv("SWIFT_FORCE3_OUT");
-    const char* slab_axis_env = std::getenv("SWIFT_SLAB_AXIS");
-    const char* slab_offset_env = std::getenv("SWIFT_SLAB_OFFSET");
-    const char* p2p_env = std::getenv("SWIFT_P2P_MODE");
-    const char* balance_env = std::getenv("SWIFT_SLAB_BALANCE");
-    const char* slab_counts_env = std::getenv("SWIFT_SLAB_COUNTS");
-    const char* out_scales_env = std::getenv("SWIFT_OUTPUT_SCALES");
-    const char* out_prefix_env = std::getenv("SWIFT_OUTPUT_PREFIX");
-    const char* midpoint_path = std::getenv("SWIFT_RESTART_MIDPOINT_OUT");
-    const char* run_fof_env = std::getenv("SWIFT_RUN_FOF");
-    const char* fof_ratio_env = std::getenv("SWIFT_FOF_LINK_RATIO");
-    const char* fof_min_env = std::getenv("SWIFT_FOF_MIN_SIZE");
-    const char* fof_slabs_env = std::getenv("SWIFT_FOF_SLABS");
-    const char* pm_grid_env = std::getenv("SWIFT_PM_GRID");
-    const char* soft_in_env = std::getenv("SWIFT_SOFT_IN");
-    const char* h0_env = std::getenv("SWIFT_COSMO_H0");
-    const char* om_m_env = std::getenv("SWIFT_COSMO_OMEGA_M");
-    const char* om_de_env = std::getenv("SWIFT_COSMO_OMEGA_DE");
-    const char* om_cdm_env = std::getenv("SWIFT_COSMO_OMEGA_CDM");
-    const char* om_r_env = std::getenv("SWIFT_COSMO_OMEGA_R");
-    const char* om_k_env = std::getenv("SWIFT_COSMO_OMEGA_K");
-    const char* w0_env = std::getenv("SWIFT_COSMO_W0");
-    const char* wa_env = std::getenv("SWIFT_COSMO_WA");
-    const char* theta_env = std::getenv("SWIFT_THETA");
-    const char* grav_eta_env = std::getenv("SWIFT_GRAV_ETA");
-    const char* ext_pot_env = std::getenv("SWIFT_EXT_POT_PLUMMER");
-    const char* fc_n_env = std::getenv("SWIFT_FORCE_CHECK_N");
-    const char* energy_log_env = std::getenv("SWIFT_ENERGY_LOG");
+    const char* requested_step = std::getenv("GRAV_SHORT_STEP_FACTOR");
+    const char* requested_mac = std::getenv("GRAV_MAC_TOLERANCE");
+    const char* requested_g = std::getenv("GRAV_G");
+    const char* requested_dt_max = std::getenv("GRAV_DT_MAX");
+    const char* requested_rms_fac = std::getenv("GRAV_MAX_DT_RMS_FACTOR");
+    const char* leaf_override = std::getenv("GRAV_LEAF_LIMIT");
+    const char* m2l_env = std::getenv("GRAV_WARP_M2L");
+    const char* fsplit_env = std::getenv("GRAV_FAST_SPLIT");
+    const char* lazy_env = std::getenv("GRAV_LAZY_TREE");
+    const char* split_force_env = std::getenv("GRAV_SPLIT_FORCE");
+    const char* split_batch_env = std::getenv("GRAV_SPLIT_BATCH_WARPS");
+    const char* pm_dist_env = std::getenv("GRAV_PM_DIST");
+    const char* domain_mode_env = std::getenv("GRAV_DOMAIN_MODE");
+    const char* rebal_interval_env = std::getenv("GRAV_REBALANCE_INTERVAL");
+    const char* rebal_min_gain_env = std::getenv("GRAV_REBALANCE_MIN_GAIN");
+    const char* force0_out_path = std::getenv("GRAV_FORCE0_OUT");
+    const char* lazy_max_env = std::getenv("GRAV_LAZY_TREE_MAX_STEPS");
+    const char* lazy_disp_env = std::getenv("GRAV_LAZY_TREE_DISP_FRAC");
+    const char* lazy_act_env = std::getenv("GRAV_LAZY_TREE_ACTIVE_FRAC");
+    const char* skip_out_env = std::getenv("GRAV_SKIP_OUTPUT_WRITE");
+    const char* force_comp_path = std::getenv("GRAV_FORCE_COMPONENTS");
+    const char* force3_out_path = std::getenv("GRAV_FORCE3_OUT");
+    const char* slab_axis_env = std::getenv("GRAV_SLAB_AXIS");
+    const char* slab_offset_env = std::getenv("GRAV_SLAB_OFFSET");
+    const char* p2p_env = std::getenv("GRAV_P2P_MODE");
+    const char* balance_env = std::getenv("GRAV_SLAB_BALANCE");
+    const char* slab_counts_env = std::getenv("GRAV_SLAB_COUNTS");
+    const char* out_scales_env = std::getenv("GRAV_OUTPUT_SCALES");
+    const char* out_prefix_env = std::getenv("GRAV_OUTPUT_PREFIX");
+    const char* midpoint_path = std::getenv("GRAV_RESTART_MIDPOINT_OUT");
+    const char* run_fof_env = std::getenv("GRAV_RUN_FOF");
+    const char* fof_ratio_env = std::getenv("GRAV_FOF_LINK_RATIO");
+    const char* fof_min_env = std::getenv("GRAV_FOF_MIN_SIZE");
+    const char* fof_slabs_env = std::getenv("GRAV_FOF_SLABS");
+    const char* pm_grid_env = std::getenv("GRAV_PM_GRID");
+    const char* soft_in_env = std::getenv("GRAV_SOFT_IN");
+    const char* h0_env = std::getenv("GRAV_COSMO_H0");
+    const char* om_m_env = std::getenv("GRAV_COSMO_OMEGA_M");
+    const char* om_de_env = std::getenv("GRAV_COSMO_OMEGA_DE");
+    const char* om_cdm_env = std::getenv("GRAV_COSMO_OMEGA_CDM");
+    const char* om_r_env = std::getenv("GRAV_COSMO_OMEGA_R");
+    const char* om_k_env = std::getenv("GRAV_COSMO_OMEGA_K");
+    const char* w0_env = std::getenv("GRAV_COSMO_W0");
+    const char* wa_env = std::getenv("GRAV_COSMO_WA");
+    const char* theta_env = std::getenv("GRAV_THETA");
+    const char* grav_eta_env = std::getenv("GRAV_ETA");
+    const char* ext_pot_env = std::getenv("GRAV_EXT_POT_PLUMMER");
+    const char* fc_n_env = std::getenv("GRAV_FORCE_CHECK_N");
+    const char* energy_log_env = std::getenv("GRAV_ENERGY_LOG");
     const bool energy_log = energy_log_env && std::string(energy_log_env) != "0";
-    const char* lc_out_env = std::getenv("SWIFT_LIGHTCONE_OUT");
-    const char* lc_obs_env = std::getenv("SWIFT_LIGHTCONE_OBS");
-    const char* lc_aobs_env = std::getenv("SWIFT_LIGHTCONE_AOBS");
-    const char* lc_rmax_env = std::getenv("SWIFT_LIGHTCONE_RMAX");
-    const char* lc_rep_env = std::getenv("SWIFT_LIGHTCONE_REPLICATE");
+    const char* lc_out_env = std::getenv("GRAV_LIGHTCONE_OUT");
+    const char* lc_obs_env = std::getenv("GRAV_LIGHTCONE_OBS");
+    const char* lc_aobs_env = std::getenv("GRAV_LIGHTCONE_AOBS");
+    const char* lc_rmax_env = std::getenv("GRAV_LIGHTCONE_RMAX");
+    const char* lc_rep_env = std::getenv("GRAV_LIGHTCONE_REPLICATE");
     const int pm_side = pm_grid_env ? std::stoi(pm_grid_env) : 128;
     if (pm_side < 32 || pm_side > 1024 || (pm_side & (pm_side - 1))) {
-      throw std::runtime_error("SWIFT_PM_GRID must be a power of two between 32 and 1024");
+      throw std::runtime_error("GRAV_PM_GRID must be a power of two between 32 and 1024");
     }
     const bool has_soft_in = soft_in_env && *soft_in_env;
     const int requested_fof_slabs = fof_slabs_env ? std::stoi(fof_slabs_env) : 0;
     if (requested_fof_slabs < 0 || requested_fof_slabs > 1024) {
-      throw std::runtime_error("SWIFT_FOF_SLABS must be between 0 and 1024");
+      throw std::runtime_error("GRAV_FOF_SLABS must be between 0 and 1024");
     }
     const int force_check_n = fc_n_env ? std::stoi(fc_n_env) : 0;
     if (force_check_n < 0 || (force_check_n > 0 && num_gpus > 1)) {
-      throw std::runtime_error("SWIFT_FORCE_CHECK_N must be >= 0 and requires SWIFT_NUM_GPUS=1");
+      throw std::runtime_error("GRAV_FORCE_CHECK_N must be >= 0 and requires GRAV_NUM_GPUS=1");
     }
     const bool lc_enabled = lc_out_env && *lc_out_env;
     if (lc_enabled && (!periodic || !comoving || num_gpus > 1)) {
-      throw std::runtime_error("SWIFT_LIGHTCONE_OUT requires SWIFT_PERIODIC=1, SWIFT_COMOVING=1, and SWIFT_NUM_GPUS=1");
+      throw std::runtime_error("GRAV_LIGHTCONE_OUT requires GRAV_PERIODIC=1, GRAV_COMOVING=1, and GRAV_NUM_GPUS=1");
     }
     const bool lc_replicate = !lc_rep_env || std::string(lc_rep_env) != "0";
     double3 lc_obs{0.5 * h.box, 0.5 * h.box, 0.5 * h.box};
@@ -3635,7 +3635,7 @@ int main(int argc, char** argv) {
     double lc_r_max_req = lc_rmax_env ? std::stod(lc_rmax_env) : 0.0;
     if (lc_enabled) {
       if (!std::isfinite(lc_a_obs) || lc_a_obs <= 0.0 || !std::isfinite(lc_r_max_req) || lc_r_max_req < 0.0) {
-        throw std::runtime_error("Invalid SWIFT_LIGHTCONE_AOBS or SWIFT_LIGHTCONE_RMAX");
+        throw std::runtime_error("Invalid GRAV_LIGHTCONE_AOBS or GRAV_LIGHTCONE_RMAX");
       }
       if (lc_obs_env && *lc_obs_env) {
         std::stringstream ss(lc_obs_env);
@@ -3643,11 +3643,11 @@ int main(int argc, char** argv) {
         double coords[3]{};
         int ci = 0;
         while (std::getline(ss, tok, ',')) {
-          if (ci >= 3) throw std::runtime_error("SWIFT_LIGHTCONE_OBS must be x,y,z");
+          if (ci >= 3) throw std::runtime_error("GRAV_LIGHTCONE_OBS must be x,y,z");
           coords[ci++] = std::stod(tok);
         }
         if (ci != 3 || !std::isfinite(coords[0]) || !std::isfinite(coords[1]) || !std::isfinite(coords[2])) {
-          throw std::runtime_error("SWIFT_LIGHTCONE_OBS must be 3 finite numbers");
+          throw std::runtime_error("GRAV_LIGHTCONE_OBS must be 3 finite numbers");
         }
         lc_obs = {coords[0], coords[1], coords[2]};
       }
@@ -3656,20 +3656,20 @@ int main(int argc, char** argv) {
     double3 ext_c_orig{0.5 * h.box, 0.5 * h.box, 0.5 * h.box};
     if (ext_pot_env && *ext_pot_env) {
       if (periodic) {
-        throw std::runtime_error("SWIFT_EXT_POT_PLUMMER requires SWIFT_PERIODIC=0");
+        throw std::runtime_error("GRAV_EXT_POT_PLUMMER requires GRAV_PERIODIC=0");
       }
       std::stringstream ss(ext_pot_env);
       std::string tok;
       double vals[5]{};
       int vi = 0;
       while (std::getline(ss, tok, ',')) {
-        if (vi >= 5) throw std::runtime_error("SWIFT_EXT_POT_PLUMMER must be M,a_s,cx,cy,cz");
+        if (vi >= 5) throw std::runtime_error("GRAV_EXT_POT_PLUMMER must be M,a_s,cx,cy,cz");
         vals[vi++] = std::stod(tok);
       }
       if (vi != 5 || !std::isfinite(vals[0]) || vals[0] <= 0.0 ||
           !std::isfinite(vals[1]) || vals[1] <= 0.0 ||
           !std::isfinite(vals[2]) || !std::isfinite(vals[3]) || !std::isfinite(vals[4])) {
-        throw std::runtime_error("Invalid SWIFT_EXT_POT_PLUMMER=M,a_s,cx,cy,cz");
+        throw std::runtime_error("Invalid GRAV_EXT_POT_PLUMMER=M,a_s,cx,cy,cz");
       }
       ext_M_val = float(vals[0]);
       ext_a_val = float(vals[1]);
@@ -3680,15 +3680,15 @@ int main(int argc, char** argv) {
     const int fof_min_size = fof_min_env ? std::stoi(fof_min_env) : 32;
     if (run_fof) {
       if (!std::isfinite(fof_link_ratio) || fof_link_ratio <= 0.0 || fof_min_size < 2) {
-        throw std::runtime_error("Invalid SWIFT_FOF_LINK_RATIO or SWIFT_FOF_MIN_SIZE");
+        throw std::runtime_error("Invalid GRAV_FOF_LINK_RATIO or GRAV_FOF_MIN_SIZE");
       }
       if (N > (1ULL << 30)) {
-        throw std::runtime_error("SWIFT_RUN_FOF supports N <= 2^30 particles");
+        throw std::runtime_error("GRAV_RUN_FOF supports N <= 2^30 particles");
       }
     }
     std::string p2p_mode = p2p_env ? p2p_env : "nvlink";
     if (p2p_mode != "nvlink" && p2p_mode != "all" && p2p_mode != "off")
-      throw std::runtime_error("SWIFT_P2P_MODE must be nvlink, all, or off");
+      throw std::runtime_error("GRAV_P2P_MODE must be nvlink, all, or off");
 
     auto trim_str = [](const std::string& s) -> std::string {
       const size_t lo = s.find_first_not_of(" \t\r\n");
@@ -3701,7 +3701,7 @@ int main(int argc, char** argv) {
     if (balance_mode == "1") balance_mode = "auto";
     else if (balance_mode == "0") balance_mode = "uniform";
     if (balance_mode != "auto" && balance_mode != "uniform")
-      throw std::runtime_error("SWIFT_SLAB_BALANCE must be auto, uniform, 1, or 0");
+      throw std::runtime_error("GRAV_SLAB_BALANCE must be auto, uniform, 1, or 0");
 
     std::vector<int> fixed_counts;
     if (slab_counts_env && *slab_counts_env) {
@@ -3710,21 +3710,21 @@ int main(int argc, char** argv) {
       int sum_cnt = 0;
       while (std::getline(ss, tok, ',')) {
         const std::string t = trim_str(tok);
-        if (t.empty()) throw std::runtime_error("Empty token in SWIFT_SLAB_COUNTS");
+        if (t.empty()) throw std::runtime_error("Empty token in GRAV_SLAB_COUNTS");
         size_t pos = 0;
         const int c = std::stoi(t, &pos);
         if (pos != t.size() || c <= 0)
-          throw std::runtime_error("Invalid count in SWIFT_SLAB_COUNTS: " + t);
+          throw std::runtime_error("Invalid count in GRAV_SLAB_COUNTS: " + t);
         fixed_counts.push_back(c);
         sum_cnt += c;
       }
       if (int(fixed_counts.size()) != num_gpus || sum_cnt != num_slabs) {
-        throw std::runtime_error("SWIFT_SLAB_COUNTS must have G positive integers summing to 12");
+        throw std::runtime_error("GRAV_SLAB_COUNTS must have G positive integers summing to 12");
       }
       balance_mode = "fixed";
     } else if (balance_mode == "uniform") {
       if (num_slabs % num_gpus != 0) {
-        throw std::runtime_error("Uniform slab balance requires 12 divisible by SWIFT_NUM_GPUS");
+        throw std::runtime_error("Uniform slab balance requires 12 divisible by GRAV_NUM_GPUS");
       }
       fixed_counts.assign(num_gpus, num_slabs / num_gpus);
     }
@@ -3732,21 +3732,21 @@ int main(int argc, char** argv) {
     std::vector<double> snap_scales;
     if (out_scales_env && *out_scales_env) {
       if (midpoint_path && *midpoint_path) {
-        throw std::runtime_error("Cannot combine SWIFT_OUTPUT_SCALES and SWIFT_RESTART_MIDPOINT_OUT");
+        throw std::runtime_error("Cannot combine GRAV_OUTPUT_SCALES and GRAV_RESTART_MIDPOINT_OUT");
       }
       std::stringstream ss(out_scales_env);
       std::string tok;
       while (std::getline(ss, tok, ',')) {
         const std::string t = trim_str(tok);
-        if (t.empty()) throw std::runtime_error("Empty token in SWIFT_OUTPUT_SCALES");
+        if (t.empty()) throw std::runtime_error("Empty token in GRAV_OUTPUT_SCALES");
         size_t pos = 0;
         const double val = std::stod(t, &pos);
         if (pos != t.size() || !std::isfinite(val))
-          throw std::runtime_error("Invalid scale factor in SWIFT_OUTPUT_SCALES: " + t);
+          throw std::runtime_error("Invalid scale factor in GRAV_OUTPUT_SCALES: " + t);
         if (!(val > h.initial_scale && val < a_end))
-          throw std::runtime_error("SWIFT_OUTPUT_SCALES must satisfy a_begin < a_k < a_end");
+          throw std::runtime_error("GRAV_OUTPUT_SCALES must satisfy a_begin < a_k < a_end");
         if (!snap_scales.empty() && !(val > snap_scales.back()))
-          throw std::runtime_error("SWIFT_OUTPUT_SCALES must be strictly increasing");
+          throw std::runtime_error("GRAV_OUTPUT_SCALES must be strictly increasing");
         snap_scales.push_back(val);
       }
     }
@@ -3765,13 +3765,13 @@ int main(int argc, char** argv) {
     if (slab_axis_env && std::string(slab_axis_env) != "auto") {
       requested_axis = std::stoi(slab_axis_env);
       if (requested_axis < 0 || requested_axis > 2)
-        throw std::runtime_error("SWIFT_SLAB_AXIS must be auto, 0, 1, or 2");
+        throw std::runtime_error("GRAV_SLAB_AXIS must be auto, 0, 1, or 2");
     }
     int requested_offset = -1;
     if (slab_offset_env && std::string(slab_offset_env) != "auto") {
       requested_offset = std::stoi(slab_offset_env);
       if (requested_offset < 0 || requested_offset >= num_slabs)
-        throw std::runtime_error("SWIFT_SLAB_OFFSET must be auto or 0..11");
+        throw std::runtime_error("GRAV_SLAB_OFFSET must be auto or 0..11");
     }
 
     const float step_factor = requested_step ? std::stof(requested_step) : 1.f;
@@ -3798,24 +3798,24 @@ int main(int argc, char** argv) {
     const int rebalance_interval = rebal_interval_env ? std::stoi(rebal_interval_env) : 8;
     const double rebalance_min_gain = rebal_min_gain_env ? std::stod(rebal_min_gain_env) : 0.02;
     if (rebalance_interval < 0 || !std::isfinite(rebalance_min_gain) || rebalance_min_gain < 0.0) {
-      throw std::runtime_error("Invalid SWIFT_REBALANCE_INTERVAL or SWIFT_REBALANCE_MIN_GAIN");
+      throw std::runtime_error("Invalid GRAV_REBALANCE_INTERVAL or GRAV_REBALANCE_MIN_GAIN");
     }
-    swift3d::DomainMode domain_mode = swift3d::parse_domain_mode(domain_mode_env, num_gpus);
-    if (domain_mode != swift3d::DomainMode::Slab1D && (!periodic || !split_force_enabled)) {
+    grav3d::DomainMode domain_mode = grav3d::parse_domain_mode(domain_mode_env, num_gpus);
+    if (domain_mode != grav3d::DomainMode::Slab1D && (!periodic || !split_force_enabled)) {
       if (domain_mode_env && std::string(domain_mode_env) != "auto" &&
           std::string(domain_mode_env) != "1d_slab") {
-        throw std::runtime_error("3D domain mode requires SWIFT_PERIODIC=1 and SWIFT_SPLIT_FORCE=1");
+        throw std::runtime_error("3D domain mode requires GRAV_PERIODIC=1 and GRAV_SPLIT_FORCE=1");
       }
-      domain_mode = swift3d::DomainMode::Slab1D;
+      domain_mode = grav3d::DomainMode::Slab1D;
     }
-    const bool split_profile = split_force_enabled && std::getenv("SWIFT_SPLIT_PROFILE") &&
-                               std::string(std::getenv("SWIFT_SPLIT_PROFILE")) == "1";
+    const bool split_profile = split_force_enabled && std::getenv("GRAV_SPLIT_PROFILE") &&
+                               std::string(std::getenv("GRAV_SPLIT_PROFILE")) == "1";
     const int split_batch_warps = split_batch_env ? std::stoi(split_batch_env) : 16384;
     if (split_batch_warps < 256 || split_batch_warps > (1 << 20)) {
-      throw std::runtime_error("SWIFT_SPLIT_BATCH_WARPS must be between 256 and 1048576");
+      throw std::runtime_error("GRAV_SPLIT_BATCH_WARPS must be between 256 and 1048576");
     }
-    if (force0_out_path && num_gpus > 1 && domain_mode == swift3d::DomainMode::Slab1D) {
-      throw std::runtime_error("SWIFT_FORCE0_OUT on 1d_slab requires SWIFT_NUM_GPUS=1");
+    if (force0_out_path && num_gpus > 1 && domain_mode == grav3d::DomainMode::Slab1D) {
+      throw std::runtime_error("GRAV_FORCE0_OUT on 1d_slab requires GRAV_NUM_GPUS=1");
     }
     const int lazy_max_steps = lazy_max_env ? std::stoi(lazy_max_env) : 16;
     const double lazy_disp_frac = lazy_disp_env ? std::stod(lazy_disp_env) : 0.15;
@@ -3891,7 +3891,7 @@ int main(int argc, char** argv) {
     if (has_soft_in) rs.resize(chunk);
 
     std::array<std::array<size_t, num_slabs>, 3> axis_counts{};
-    std::array<uint64_t, swift3d::N_TOP_CELLS> init_cell_counts{};
+    std::array<uint64_t, grav3d::N_TOP_CELLS> init_cell_counts{};
     double total_mass = 0.0, min_mass = DBL_MAX;
     float first_mass = 0.f;
     float first_soft_plummer = float(h.plummer_softening);
@@ -3904,12 +3904,12 @@ int main(int argc, char** argv) {
     FILE* fm = fopen(argv[1], "rb");
     FILE* fs = has_soft_in ? fopen(soft_in_env, "rb") : nullptr;
     if (!fx || !fv || !fm || (has_soft_in && !fs))
-      throw std::runtime_error("Failed reopening input or SWIFT_SOFT_IN for streaming");
+      throw std::runtime_error("Failed reopening input or GRAV_SOFT_IN for streaming");
     if (fs) {
-      if (fseeko(fs, 0, SEEK_END) != 0) throw std::runtime_error("Failed seeking SWIFT_SOFT_IN");
+      if (fseeko(fs, 0, SEEK_END) != 0) throw std::runtime_error("Failed seeking GRAV_SOFT_IN");
       const off_t fsz = ftello(fs);
       if (fsz != off_t(N * sizeof(float))) {
-        throw std::runtime_error("SWIFT_SOFT_IN size mismatch: got " + std::to_string(fsz) +
+        throw std::runtime_error("GRAV_SOFT_IN size mismatch: got " + std::to_string(fsz) +
                                  " expected " + std::to_string(N * sizeof(float)));
       }
       fseeko(fs, 0, SEEK_SET);
@@ -3937,7 +3937,7 @@ int main(int argc, char** argv) {
         ++axis_counts[0][sx];
         ++axis_counts[1][sy];
         ++axis_counts[2][sz];
-        if (domain_mode != swift3d::DomainMode::Slab1D) {
+        if (domain_mode != grav3d::DomainMode::Slab1D) {
           ++init_cell_counts[(sx * num_slabs + sy) * num_slabs + sz];
         }
         const float mp = rm[k];
@@ -3946,13 +3946,13 @@ int main(int argc, char** argv) {
         if (mp > 0.f && double(mp) < min_mass) min_mass = double(mp);
         if (fs) {
           const float sp = rs[k];
-          if (!std::isfinite(sp) || sp <= 0.f) throw std::runtime_error("Invalid softening in SWIFT_SOFT_IN");
+          if (!std::isfinite(sp) || sp <= 0.f) throw std::runtime_error("Invalid softening in GRAV_SOFT_IN");
           if (sp != first_soft_plummer) soft_uniform = false;
         }
       }
     }
 
-    if (domain_mode != swift3d::DomainMode::Slab1D) {
+    if (domain_mode != grav3d::DomainMode::Slab1D) {
       fclose(fx);
       fclose(fv);
       fclose(fm);
@@ -3967,7 +3967,7 @@ int main(int argc, char** argv) {
       for (auto& G : gpus) G.cleanup();
       check(cudaSetDevice(0));
 
-      swift3d::Domain3DRunConfig d3cfg{};
+      grav3d::Domain3DRunConfig d3cfg{};
       d3cfg.input_path = argv[1];
       d3cfg.output_path = argv[2];
       d3cfg.started_wall = started;
@@ -4041,7 +4041,7 @@ int main(int argc, char** argv) {
       d3cfg.lc_a_obs = lc_a_obs;
       d3cfg.lc_r_max_req = lc_r_max_req;
       d3cfg.lc_out_env = lc_out_env;
-      return swift3d::run_domain_3d_evolution(d3cfg, compute_slab_cap, compute_node_cap);
+      return grav3d::run_domain_3d_evolution(d3cfg, compute_slab_cap, compute_node_cap);
     }
 
     // Optimal cyclic load balance (axis, offset, contiguous per-GPU slab counts) WITHOUT shifting coordinates
@@ -4273,7 +4273,7 @@ int main(int argc, char** argv) {
     if (fs) fclose(fs);
     fclose(input);
     { std::vector<double3>().swap(rx); std::vector<float3>().swap(rv); std::vector<float>().swap(rm); std::vector<float>().swap(rs); }
-    if (const char* unlink_env = std::getenv("SWIFT_UNLINK_INPUT_AFTER_LOAD")) {
+    if (const char* unlink_env = std::getenv("GRAV_UNLINK_INPUT_AFTER_LOAD")) {
       if (std::string(unlink_env) == "1") std::remove(argv[1]);
     }
 
@@ -4356,7 +4356,7 @@ int main(int argc, char** argv) {
     check(cudaSetDevice(0));
     const double load_s = wall() - import_start;
 
-    SwiftDistPm dist_pm;
+    GravDistPm dist_pm;
     if (pm_dist_enabled) {
       std::vector<int> devs(num_gpus);
       std::vector<cudaStream_t> streams(num_gpus);
@@ -4557,7 +4557,7 @@ int main(int argc, char** argv) {
       const double chi_max_evo = comoving_distance_mpc(h.initial_scale, lc_a_obs, p);
       lc_r_max = (lc_r_max_req > 0.0) ? lc_r_max_req : chi_max_evo;
       lc_fp = fopen(lc_out_env, "wb");
-      if (!lc_fp) throw std::runtime_error(std::string("Cannot open SWIFT_LIGHTCONE_OUT: ") + lc_out_env);
+      if (!lc_fp) throw std::runtime_error(std::string("Cannot open GRAV_LIGHTCONE_OUT: ") + lc_out_env);
       const LightconeHeader blank_hdr{{'S','W','L','C','0','0','0','1'}, 0,
                                       {lc_obs.x, lc_obs.y, lc_obs.z},
                                       h.initial_scale, a_end, lc_a_obs, lc_r_max, h.box};
@@ -5347,16 +5347,16 @@ int main(int argc, char** argv) {
             for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
               const auto& S = G.slabs[ls];
               if (S.ns > 0) {
-                swift_pm_cuda_deposit_buf(
+                grav_pm_cuda_deposit_buf(
                     S.d_x.p, mass_uniform ? nullptr : S.d_mass.p, first_mass,
                     S.ns, G.d_pm_density.p, pm_side, h.box, G.compute_stream);
               }
             }
-            swift_pm_cuda_solve_on_device(G.d_pm_density.p, G.d_pm_field.p, pm_side, h.box, r_s, G.compute_stream);
+            grav_pm_cuda_solve_on_device(G.d_pm_density.p, G.d_pm_field.p, pm_side, h.box, r_s, G.compute_stream);
             for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
               const auto& S = G.slabs[ls];
               if (S.ns > 0) {
-                swift_pm_cuda_interpolate_buf(
+                grav_pm_cuda_interpolate_buf(
                     S.d_x.p, S.ns, G.d_pm_field.p, pm_side, h.box, p.G,
                     S.d_mesh_acc.p, nullptr, G.compute_stream);
               }
@@ -5367,7 +5367,7 @@ int main(int argc, char** argv) {
             for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
               const auto& S = G.slabs[ls];
               if (S.ns > 0) {
-                swift_pm_cuda_deposit_buf(
+                grav_pm_cuda_deposit_buf(
                     S.d_x.p, mass_uniform ? nullptr : S.d_mass.p, first_mass,
                     S.ns, G.d_pm_density.p, pm_side, h.box, G.compute_stream);
               }
@@ -5385,7 +5385,7 @@ int main(int argc, char** argv) {
               }
               check(cudaMemcpyAsync(G.d_pm_density.p, d0, pm_points * sizeof(double),
                                     cudaMemcpyHostToDevice, G.compute_stream));
-              swift_pm_cuda_solve_on_device(G.d_pm_density.p, G.d_pm_field.p, pm_side, h.box, r_s, G.compute_stream);
+              grav_pm_cuda_solve_on_device(G.d_pm_density.p, G.d_pm_field.p, pm_side, h.box, r_s, G.compute_stream);
               check(cudaMemcpyAsync(h_pm_field.p, G.d_pm_field.p,
                                     pm_points * sizeof(double4),
                                     cudaMemcpyDeviceToHost, G.compute_stream));
@@ -5400,7 +5400,7 @@ int main(int argc, char** argv) {
             for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
               const auto& S = G.slabs[ls];
               if (S.ns > 0) {
-                swift_pm_cuda_interpolate_buf(
+                grav_pm_cuda_interpolate_buf(
                     S.d_x.p, S.ns, G.d_pm_field.p, pm_side, h.box, p.G,
                     S.d_mesh_acc.p, nullptr, G.compute_stream);
               }
@@ -5753,7 +5753,7 @@ int main(int argc, char** argv) {
                 dist_pm.interpolate(g, S.d_x.p, size_t(ns), h.box, p.G,
                                     S.d_mesh_acc.p, G.d_pm_pot);
               } else {
-                swift_pm_cuda_interpolate_buf(
+                grav_pm_cuda_interpolate_buf(
                     S.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
                     S.d_mesh_acc.p, G.d_pm_pot, G.compute_stream);
               }
@@ -5815,7 +5815,7 @@ int main(int argc, char** argv) {
                 dist_pm.interpolate(g, S.d_x.p, size_t(ns), h.box, p.G,
                                     S.d_mesh_acc.p, G.d_pm_pot);
               } else {
-                swift_pm_cuda_interpolate_buf(
+                grav_pm_cuda_interpolate_buf(
                     S.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
                     S.d_mesh_acc.p, G.d_pm_pot, G.compute_stream);
               }
@@ -6168,13 +6168,13 @@ int main(int argc, char** argv) {
               for (int ls = 0; ls < G0.slabs_per_gpu; ++ls) {
                 const auto& sl = G0.slabs[ls];
                 if (sl.ns > 0) {
-                  swift_pm_cuda_deposit_buf(
+                  grav_pm_cuda_deposit_buf(
                       sl.d_x.p, mass_uniform ? nullptr : sl.d_mass.p, first_mass,
                       sl.ns, G0.d_pm_density.p, pm_side, h.box, G0.compute_stream);
                 }
               }
-              swift_pm_cuda_solve_on_device(G0.d_pm_density.p, G0.d_pm_field.p, pm_side, h.box, r_s, G0.compute_stream);
-              swift_pm_cuda_interpolate_buf(
+              grav_pm_cuda_solve_on_device(G0.d_pm_density.p, G0.d_pm_field.p, pm_side, h.box, r_s, G0.compute_stream);
+              grav_pm_cuda_interpolate_buf(
                   d_fc_tgt_x.p, size_t(n_fc_tgt), G0.d_pm_field.p, pm_side, h.box, p.G,
                   d_fc_gpu_mesh.p, nullptr, G0.compute_stream);
             }
@@ -6295,11 +6295,11 @@ int main(int argc, char** argv) {
               fof_ids.resize(N);
               const int fof_slabs = requested_fof_slabs > 0 ? requested_fof_slabs : ((N <= (128ULL << 20)) ? 1 : 16);
               const int fst = (fof_slabs <= 1)
-                  ? whole_fof_swift(
+                  ? whole_fof_ranked(
                         reinterpret_cast<const double*>(out_x.data()), int(N),
                         h.box, h.box, h.box, fof_link, fof_min_size,
                         fof_ids.data(), &fof_ngrp, &fof_ngrouped, &fof_largest, fof_el, nullptr)
-                  : whole_fof_slabbed_swift(
+                  : whole_fof_slabbed(
                         reinterpret_cast<const double*>(out_x.data()), N,
                         h.box, h.box, h.box, fof_link, fof_min_size, fof_slabs,
                         fof_ids.data(), &fof_ngrp, &fof_ngrouped, &fof_largest, fof_el, nullptr);
@@ -6370,23 +6370,23 @@ int main(int argc, char** argv) {
 
     if (force0_out_path) {
       FILE* fp = fopen(force0_out_path, "wb");
-      if (!fp) throw std::runtime_error("Could not open SWIFT_FORCE0_OUT output");
+      if (!fp) throw std::runtime_error("Could not open GRAV_FORCE0_OUT output");
       write_bin(fp, out_force0_f4.data(), out_force0_f4.size());
-      if (fclose(fp)) throw std::runtime_error("Could not close SWIFT_FORCE0_OUT");
+      if (fclose(fp)) throw std::runtime_error("Could not close GRAV_FORCE0_OUT");
     }
     if (force_comp_path) {
       FILE* fp = fopen(force_comp_path, "wb");
-      if (!fp) throw std::runtime_error("Could not open SWIFT_FORCE_COMPONENTS output");
+      if (!fp) throw std::runtime_error("Could not open GRAV_FORCE_COMPONENTS output");
       write_bin(fp, out_short_f4.data(), out_short_f4.size());
       write_bin(fp, out_long_f4.data(), out_long_f4.size());
-      if (fclose(fp)) throw std::runtime_error("Could not close SWIFT_FORCE_COMPONENTS");
+      if (fclose(fp)) throw std::runtime_error("Could not close GRAV_FORCE_COMPONENTS");
     }
     if (force3_out_path) {
       FILE* fp = fopen(force3_out_path, "wb");
-      if (!fp) throw std::runtime_error("Could not open SWIFT_FORCE3_OUT output");
+      if (!fp) throw std::runtime_error("Could not open GRAV_FORCE3_OUT output");
       write_bin(fp, out_short_f3.data(), out_short_f3.size());
       write_bin(fp, out_long_f3.data(), out_long_f3.size());
-      if (fclose(fp)) throw std::runtime_error("Could not close SWIFT_FORCE3_OUT");
+      if (fclose(fp)) throw std::runtime_error("Could not close GRAV_FORCE3_OUT");
     }
 
     const double start_output = wall();
@@ -6491,11 +6491,11 @@ int main(int argc, char** argv) {
       double fof_el[9]{};
       std::vector<int64_t> fof_ids(N);
       const int fst = (fof_slabs <= 1)
-          ? whole_fof_swift(
+          ? whole_fof_ranked(
                 reinterpret_cast<const double*>(out_x.data()), int(N),
                 h.box, h.box, h.box, fof_link, fof_min_size,
                 fof_ids.data(), &ngrp, &ngrouped, &largest, fof_el, nullptr)
-          : whole_fof_slabbed_swift(
+          : whole_fof_slabbed(
                 reinterpret_cast<const double*>(out_x.data()), N,
                 h.box, h.box, h.box, fof_link, fof_min_size, fof_slabs,
                 fof_ids.data(), &ngrp, &ngrouped, &largest, fof_el, nullptr);

@@ -103,9 +103,9 @@ __global__ void build_force_tiles(const probe_particle* particles,const Key* key
         if(closest>soft && distance+radius<=c.w+p.cutoff &&
            (initial || 8.f*source.m.power[2]<p.mac_tolerance*old*closest2*closest2)) {
           potential_derivatives_M2L derivatives;
-          swift_cuda_potential_derivatives_compute_M2L(d.x,d.y,d.z,r2,1/distance,soft,1,
+          grav_cuda_potential_derivatives_compute_M2L(d.x,d.y,d.z,r2,1/distance,soft,1,
                                                        inv_split,&derivatives);
-          swift_cuda_gravity_M2L_apply(&field,&source.m,&derivatives);
+          grav_cuda_gravity_M2L_apply(&field,&source.m,&derivatives);
           ++accepted;
           node=escape[node];
           continue;

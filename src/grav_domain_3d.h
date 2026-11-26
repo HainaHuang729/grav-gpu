@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace swift3d {
+namespace grav3d {
 
 constexpr int N_TOP = 12;
 constexpr int N_TOP_CELLS = N_TOP * N_TOP * N_TOP; // 1728
@@ -33,7 +33,7 @@ inline DomainMode parse_domain_mode(const char* s, int num_gpus) {
   if (val == "3d_hilbert") return DomainMode::Hilbert3D;
   if (val == "3d_orb") return DomainMode::Orb3D;
   throw std::runtime_error(
-      "Invalid SWIFT_DOMAIN_MODE '" + val +
+      "Invalid GRAV_DOMAIN_MODE '" + val +
       "' (expected auto, 1d_slab, 3d_hilbert, or 3d_orb)");
 }
 
@@ -798,4 +798,4 @@ inline Domain3DPlan build_domain_3d_plan(
       counts, weights, cell_owner, num_gpus, mode, pm_side, chosen_rot, nullptr);
 }
 
-} // namespace swift3d
+} // namespace grav3d

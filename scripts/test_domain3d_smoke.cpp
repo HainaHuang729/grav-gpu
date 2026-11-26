@@ -1,4 +1,4 @@
-#include "swift_domain_3d.h"
+#include "grav_domain_3d.h"
 
 #include <array>
 #include <cassert>
@@ -7,7 +7,7 @@
 #include <iostream>
 
 int main() {
-  using namespace swift3d;
+  using namespace grav3d;
   std::array<uint64_t, N_TOP_CELLS> counts{};
   std::array<double, N_TOP_CELLS> weights{};
   for (int cid = 0; cid < N_TOP_CELLS; ++cid) {
