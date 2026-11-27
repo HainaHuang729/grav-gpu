@@ -51,7 +51,8 @@ The remainder of this paper is organized as follows. Section~\ref{sec:arch} desc
 
 To fit $1024^3$ particles cleanly across $4 \times 48\,\mathrm{GiB}$ GPUs without exceeding any device's $50.90\,\mathrm{GB}$ ($49{,}140\,\mathrm{MiB}$) ceiling even under strong nonlinear clustering at $z=0$, \texttt{multi\_gpu\_slab.cu} divides the periodic box along one Cartesian axis into $N_s = 12$ uniform slabs of width $L/12$, assigning $12/G$ contiguous slabs per GPU. Before allocating device buffers, Pass~1 streams the binary initial-state coordinates in $16\mathrm{M}$-particle chunks, builds slab histograms along all three coordinate axes ($x, y, z$), and searches all $3 \times 12$ cyclic \texttt{(axis, offset)} pairs to minimize the maximum particle count on any single GPU:
 \begin{equation}
-  (a^*, o^*) = \arg\min_{(a,o)} \left( \max_{0 \le g < G} \sum_{\ell=0}^{N_s/G - 1} N_{a, (o + g N_s/G + \ell)\bmod 12} \right),
+  (a^*, o^*) = \arg\min_{(a,o)} \max_{0 \le g < G}
+  \sum_{\ell=0}^{N_s/G - 1} N_{a, (o + g N_s/G + \ell)\bmod 12},
 \end{equation}
 breaking ties by minimum peak single-slab count without modifying particle coordinates. On our $L = 25\,h^{-1}\mathrm{Mpc}$ cosmological box at both $z = 2.033$ and $z = 0.063$, Pass~1 automatically selects \texttt{slab\_axis = 1} ($Y$-axis) and \texttt{slab\_offset = 2}.
 
@@ -168,7 +169,7 @@ On the deconvolved $256^3$ FFT density field over $k \in [0.3, 16]\,h\,\mathrm{M
 \begin{table}[!tbp]
 \caption{End-to-end $1024^3$ accuracy on $4\times$ RTX A6000 Dual-NVLink relative to archival 256-core CPU \texttt{SWIFT} ($0.3\text{--}16\,h\,\mathrm{Mpc}^{-1}$).}\label{tab:acc}
 \scriptsize
-\setlength{\tabcolsep}{1.8pt}
+\setlength{\tabcolsep}{1.1pt}
 \begin{ruledtabular}
 \begin{tabular}{lcc}
 Metric & \texttt{0056} ($z=0$) & \texttt{0045} ($z=1.758$) \\
@@ -181,7 +182,7 @@ Sync vel RMS / p50 & $\mathbf{1.187}$ / $\mathbf{0.336}$ & \textit{(already sync
 Raw $P_\theta(k)$ max dev & $0.7018\%$ ($0.99976$) & $\mathbf{0.01112\%}$ ($0.9999999$) \\
 Aligned $P_\theta(k)$ dev & $\mathbf{0.0405\%}$ ($0.9999996$) & \textit{(over-shift $0.569\%$)} \\
 FoF $\#1$ halo & $34.804\mathrm{M}$ vs.\ $34.805\mathrm{M}$ & $6.566\mathrm{M}$ vs.\ $6.563\mathrm{M}$ \\
-FoF $N\!\ge\!32..65\text{k}$ diff & $-0.32\%\,..\,{+}0.03\%$ & $-0.18\%\,..\,{+}0.02\%$ \\
+FoF $32\text{--}65\text{k}$ diff & $-0.32\%\,..\,{+}0.03\%$ & $-0.18\%\,..\,{+}0.02\%$ \\
 FoF $N\!\ge\!262{,}144$ & $198$ vs.\ $198$ ($0.0\%$) & $146$ vs.\ $147$ ($-0.68\%$) \\
 \end{tabular}
 \end{ruledtabular}
@@ -211,17 +212,17 @@ To validate gravitational accuracy independently of any single external simulati
 \begin{table}[!tbp]
 \caption{Reference-independent analytical, exact-Ewald, and conservation verification gates.}\label{tab:physgates}
 \scriptsize
-\setlength{\tabcolsep}{1.3pt}
+\setlength{\tabcolsep}{0.9pt}
 \begin{ruledtabular}
 \begin{tabular}{lll}
 Gate & Metric & Result \\
 \hline
-Zel'dovich $64^3$ & $\Delta x_{\rm RMS}/L$ ; $\Delta v/v_{\rm pk}$ & $4.41{\times}10^{-4}$ ; $0.59\%$ \\
-Ewald Short ($\theta{=}0.9{\to}0.3$) & Med $|\Delta\mathbf{a}_{\rm s}|/|\mathbf{a}_{\rm s}|$ & $8.48{\to}0.114{\times}10^{-3}$ \\
-Ewald Total ($\theta{=}0.7 / 0.3$) & Med $|\Delta\mathbf{a}|/|\mathbf{a}|$ & $1.98$ / $1.03{\times}10^{-3}$ \\
-Plummer 32K ($t{=}0{\to}4$) & $|\Delta E/E_0|$ ; $2T/|U|$ & $1.15{\times}10^{-5}$ ; $0.996$--$0.999$ \\
-$256^3$ $z{=}200{\to}0$ (4G) & L--I ; $P_\delta$ ; $N{\ge}10^4$ & $0.031\%$ ; $0.12\%$ ; $89/89$ \\
-4G 3D vs.\ 1G 1D & Face / all $|\Delta\mathbf{a}|/|\mathbf{a}|$ & $1.15$ / $1.03{\times}10^{-4}$ \\
+Zel'dovich $64^3$ & $\Delta x_{\rm RMS}/L$; $\Delta v/v_{\rm pk}$ & $4.41\!\times\!10^{-4}$; $0.59\%$ \\
+Ewald Short ($\theta{:}0.9{\to}0.3$) & Med $|\Delta\mathbf{a}_{\rm s}|/|\mathbf{a}_{\rm s}|$ & $8.48{\to}0.114\!\times\!10^{-3}$ \\
+Ewald Total ($\theta{=}0.7/0.3$) & Med $|\Delta\mathbf{a}|/|\mathbf{a}|$ & $1.98$/$1.03\!\times\!10^{-3}$ \\
+Plummer 32K ($t{:}0{\to}4$) & $|\Delta E/E_0|$; $2T/|U|$ & $1.15\!\times\!10^{-5}$; $0.996\text{--}0.999$ \\
+$256^3$ $z{=}200{\to}0$ (4G) & L--I; $P_\delta$; $N{\ge}10^4$ & $0.031\%$; $0.12\%$; $89/89$ \\
+4G 3D vs.\ 1G 1D & Face / all $|\Delta\mathbf{a}|/|\mathbf{a}|$ & $1.15$/$1.03\!\times\!10^{-4}$ \\
 \end{tabular}
 \end{ruledtabular}
 \end{table}
