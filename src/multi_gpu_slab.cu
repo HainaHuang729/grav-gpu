@@ -3908,7 +3908,7 @@ int main(int argc, char** argv) {
     const double import_start = wall();
     std::vector<std::vector<int>> can_peer;
     std::array<uint64_t, grav3d::N_TOP_CELLS> init_cell_counts{};
-    double total_mass = 0.0, min_mass = DBL_MAX;
+    double total_mass = 0.0, min_mass = DBL_MAX, max_mass = 0.0;
     float first_mass = 0.f;
     float first_soft_plummer = float(h.plummer_softening);
     bool mass_uniform = true;
@@ -3955,6 +3955,7 @@ int main(int argc, char** argv) {
           if (mp != first_mass) mass_uniform = false;
           total_mass += double(mp);
           if (mp > 0.f && double(mp) < min_mass) min_mass = double(mp);
+        if (double(mp) > max_mass) max_mass = double(mp);
           if (fs) {
             const float sp = rs[k];
             if (!std::isfinite(sp) || sp <= 0.f) throw std::runtime_error("Invalid softening in GRAV_SOFT_IN");
@@ -4037,7 +4038,7 @@ int main(int argc, char** argv) {
 
     std::array<std::array<size_t, num_slabs>, 3> axis_counts{};
     std::array<uint64_t, grav3d::N_TOP_CELLS> init_cell_counts{};
-    double total_mass = 0.0, min_mass = DBL_MAX;
+    double total_mass = 0.0, min_mass = DBL_MAX, max_mass = 0.0;
     float first_mass = 0.f;
     float first_soft_plummer = float(h.plummer_softening);
     bool mass_uniform = true;
@@ -4089,6 +4090,7 @@ int main(int argc, char** argv) {
         if (mp != first_mass) mass_uniform = false;
         total_mass += double(mp);
         if (mp > 0.f && double(mp) < min_mass) min_mass = double(mp);
+        if (double(mp) > max_mass) max_mass = double(mp);
         if (fs) {
           const float sp = rs[k];
           if (!std::isfinite(sp) || sp <= 0.f) throw std::runtime_error("Invalid softening in GRAV_SOFT_IN");
@@ -4513,6 +4515,16 @@ int main(int argc, char** argv) {
     }
     check(cudaSetDevice(0));
     const double load_s = wall() - import_start;
+
+    if (!mass_uniform || !soft_uniform) {
+      std::cout << std::setprecision(10)
+                << "ZOOMIN_CONFIG {\"uniform_mass\":" << (mass_uniform ? "true" : "false")
+                << ",\"uniform_soft\":" << (soft_uniform ? "true" : "false")
+                << ",\"min_mass\":" << min_mass
+                << ",\"max_mass\":" << max_mass
+                << ",\"mass_ratio\":" << (min_mass > 0.0 ? (max_mass / min_mass) : 0.0)
+                << "}" << std::endl;
+    }
 
     const GravPmConfig pm_cfg = grav_pm_get_config();
     const int pm_halo_lo = grav_pm_x_halo_lo(pm_cfg.order, pm_cfg.interlace);
@@ -6538,7 +6550,10 @@ int main(int argc, char** argv) {
             std::vector<int64_t> fof_ids;
             std::string fof_path;
             uint64_t fof_ngrp = 0, fof_ngrouped = 0, fof_largest = 0;
-            const double fof_link = fof_link_ratio * h.box / std::cbrt(double(N));
+            const char* fof_link_mpc_env = std::getenv("GRAV_FOF_LINK_MPC");
+            const double fof_link = (fof_link_mpc_env && *fof_link_mpc_env)
+                ? std::stod(fof_link_mpc_env)
+                : (fof_link_ratio * h.box / std::cbrt(double(N)));
             if (run_fof && !skip_output_write) {
               check(cudaSetDevice(0));
               const double fof_t0 = wall();

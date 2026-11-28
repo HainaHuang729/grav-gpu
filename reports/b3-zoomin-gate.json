@@ -1,0 +1,71 @@
+{
+  "generated_at": "2026-11-28",
+  "cluster": "phy-gpus (node b4, NVIDIA GeForce RTX 4090, CUDA 12.6)",
+  "slurm_job_id": 492188,
+  "total_job_elapsed": "00:08:56",
+  "status": "PASSED",
+  "config": {
+    "box_mpc": 50.0,
+    "n_base": 16,
+    "a_init": 0.05,
+    "a_end": 1.0,
+    "pm": "GRAV_PM_ORDER=3 GRAV_PM_INTERLACE=1 GRAV_PM_GRAD=ik GRAV_PM_GRID=128 GRAV_DYNAMIC_PM=1",
+    "per_particle_softening": "GRAV_SOFT_IN (*.soft.bin, eps_i = 0.05 * dx_i)"
+  },
+  "runs": [
+    {
+      "n_eff": 2048,
+      "n_levels": 8,
+      "dx_hr_kpc": 24.414,
+      "min_soft_kpc": 1.221,
+      "n_total": 143200,
+      "n_high_res": 46656,
+      "mass_dynamic_ratio": 2097152.0,
+      "evolution_wall_s": 31.28,
+      "R200c_mpc": 0.032707,
+      "M200c_1e10msun": 0.369322,
+      "R200m_mpc": 0.054489,
+      "M200m_1e10msun": 0.538498,
+      "n_hr_in_R200c": 6392,
+      "n_lr_in_R200c": 0,
+      "n_lr_in_1p5_R200c": 0,
+      "n_lr_in_2p0_R200c": 0,
+      "min_lr_over_R200c": 11.958,
+      "zero_contamination_R200c": true,
+      "n_subhalos_fof": 0
+    },
+    {
+      "n_eff": 4096,
+      "n_levels": 9,
+      "dx_hr_kpc": 12.207,
+      "min_soft_kpc": 0.610,
+      "n_total": 1164808,
+      "n_high_res": 314432,
+      "mass_dynamic_ratio": 16777216.0,
+      "R200c_mpc": 0.032316,
+      "M200c_1e10msun": 0.356062,
+      "R200m_mpc": 0.053639,
+      "M200m_1e10msun": 0.513357,
+      "n_hr_in_R200c": 49300,
+      "n_lr_in_R200c": 0,
+      "n_lr_in_1p5_R200c": 0,
+      "n_lr_in_2p0_R200c": 0,
+      "min_lr_over_R200c": 9.815,
+      "zero_contamination_R200c": true,
+      "n_subhalos_fof": 35,
+      "top_subhalo_masses_1e10msun": [
+        0.179280,
+        0.000968,
+        0.000397,
+        0.000325,
+        0.000325
+      ]
+    }
+  ],
+  "convergence_2048_vs_4096": {
+    "R200c_rel_diff_pct": 1.20,
+    "M200c_rel_diff_pct": 3.59,
+    "R200m_rel_diff_pct": 1.56,
+    "M200m_rel_diff_pct": 4.67
+  }
+}

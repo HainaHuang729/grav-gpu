@@ -114,6 +114,10 @@ $(BUILD_DIR)/test_p3_b2: scripts/test_p3_b2.cpp src/grav_timestep_p3.cuh src/gra
 test-p3-b2: $(BUILD_DIR)/test_p3_b2
 	./$(BUILD_DIR)/test_p3_b2
 
+test-zoomin:
+	python3 scripts/zoomin_pipeline.py generate $(BUILD_DIR)/zoom_test.bin --soft-out $(BUILD_DIR)/zoom_test.soft.bin --n-eff 2048 --hr-half-width 0.35
+	rm -f $(BUILD_DIR)/zoom_test.bin $(BUILD_DIR)/zoom_test.soft.bin
+
 $(BUILD_DIR)/test_neutrino_b1: scripts/test_neutrino_b1.cpp src/grav_neutrino.cuh | $(BUILD_DIR)
 	$(CXX) -O2 -std=c++17 -Wall -Wextra -Werror -Isrc scripts/test_neutrino_b1.cpp -o $@
 
