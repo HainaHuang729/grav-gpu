@@ -432,11 +432,15 @@
     <!-- Visual Charts -->
     <section>
       <div class="sec-head">
-        <h2>速度与精度对比图表</h2>
+        <h2>论文图集与性能对比（7 图）</h2>
         <div class="tabs" role="tablist" aria-label="图表切换">
           <button class="tab-btn" role="tab" aria-selected="true" data-fig="speed">速度与核函数拆解</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-fig="acc">全波数功率谱精度</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-fig="codes">跨代码时间与能耗</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-fig="arch">系统架构</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-fig="vram">扩展性与显存</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-fig="val">1024³ 科学验证</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-fig="hist">全演化扩展</button>
         </div>
       </div>
 
@@ -780,6 +784,30 @@ python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_c
         pdf: "paper/figures/fig7_code_energy_comparison.pdf",
         alt: "跨代码时间、实测 NVML 能耗与精度对比图",
         desc: "SWIFT、GADGET-4、PKDGRAV3（1G/2G MPI）与 gravityCU（1G/2G/4G）在 256³ 相同物理参数下的总耗时、NVML 实测 GPU 能耗 + 整机建模能耗与功率谱偏差对比。"
+      },
+      arch: {
+        src: "paper/figures/fig1_architecture.webp",
+        pdf: "paper/figures/fig1_architecture.pdf",
+        alt: "gravityCU 显存常驻 TreePM 与 FoF 系统架构图",
+        desc: "Fig. 1：单卡与多卡 VRAM 常驻 Hilbert 空间填充曲线分域、TreePM 长短程力求解与全 GPU FoF/SO 编目管线。"
+      },
+      vram: {
+        src: "paper/figures/fig2_scaling_and_vram.webp",
+        pdf: "paper/figures/fig2_scaling_and_vram.pdf",
+        alt: "gravityCU 粒子规模扩展与显存占用曲线",
+        desc: "Fig. 2：从 128³ 到 1024³ 粒子规模的单步扩展性与显存占用预算，验证单卡/多卡显存常驻上限。"
+      },
+      val: {
+        src: "paper/figures/fig3_scientific_validation.webp",
+        pdf: "paper/figures/fig3_scientific_validation.pdf",
+        alt: "gravityCU 1024³ 科学精度验证图",
+        desc: "Fig. 3：非线性物质功率谱、暗晕质量函数与解析/跨代码基准的科学一致性验证。"
+      },
+      hist: {
+        src: "paper/figures/fig4_full_history_scaling.webp",
+        pdf: "paper/figures/fig4_full_history_scaling.pdf",
+        alt: "gravityCU 全演化红移历史扩展图",
+        desc: "Fig. 4：从高红移初始条件到 z=0 全演化过程中的步长演化与多卡加速扩展表现。"
       }
     };
 

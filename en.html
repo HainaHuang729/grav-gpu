@@ -433,11 +433,15 @@
     <!-- Visual Charts -->
     <section>
       <div class="sec-head">
-        <h2>Speed &amp; Accuracy Figures</h2>
+        <h2>Paper Figures &amp; Benchmarks (7 Figures)</h2>
         <div class="tabs" role="tablist" aria-label="Figure Switcher">
           <button class="tab-btn" role="tab" aria-selected="true" data-fig="speed">Speedup &amp; Kernel Breakdown</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-fig="acc">Power Spectra &amp; Error Ladder</button>
           <button class="tab-btn" role="tab" aria-selected="false" data-fig="codes">Cross-Code Time &amp; Energy</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-fig="arch">Architecture</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-fig="vram">Scaling &amp; VRAM</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-fig="val">1024³ Validation</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-fig="hist">Full-History Scaling</button>
         </div>
       </div>
 
@@ -781,6 +785,30 @@ python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_c
         pdf: "paper/figures/fig7_code_energy_comparison.pdf",
         alt: "Cross-Code Runtime, Energy & Accuracy Comparison",
         desc: "Runtime, measured NVML GPU + modeled whole-node energy (Wh), and P_δ(k) accuracy across SWIFT, GADGET-4, PKDGRAV3 (1G/2G MPI), and gravityCU (1G/2G/4G) at 256³."
+      },
+      arch: {
+        src: "paper/figures/fig1_architecture.webp",
+        pdf: "paper/figures/fig1_architecture.pdf",
+        alt: "gravityCU VRAM-resident TreePM and FoF Architecture",
+        desc: "Fig. 1: Single- and multi-GPU VRAM-resident 3D Hilbert domain decomposition, TreePM force evaluation, and full-GPU FoF/SO catalog pipeline."
+      },
+      vram: {
+        src: "paper/figures/fig2_scaling_and_vram.webp",
+        pdf: "paper/figures/fig2_scaling_and_vram.pdf",
+        alt: "gravityCU Particle Scaling and VRAM Budget",
+        desc: "Fig. 2: Step-time scaling and VRAM footprint from 128³ to 1024³ particles under single- and multi-GPU residency."
+      },
+      val: {
+        src: "paper/figures/fig3_scientific_validation.webp",
+        pdf: "paper/figures/fig3_scientific_validation.pdf",
+        alt: "gravityCU 1024³ Scientific Validation",
+        desc: "Fig. 3: Nonlinear matter power spectrum, halo mass function, and cross-code scientific validation."
+      },
+      hist: {
+        src: "paper/figures/fig4_full_history_scaling.webp",
+        pdf: "paper/figures/fig4_full_history_scaling.pdf",
+        alt: "gravityCU Full-History Cosmological Scaling",
+        desc: "Fig. 4: Full z=200→0 cosmological evolution step cadence and multi-GPU scaling behavior."
       }
     };
 
