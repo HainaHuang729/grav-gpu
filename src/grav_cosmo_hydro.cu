@@ -10,6 +10,7 @@
 
 #include "grav_cuda_pm.h"
 #include "grav_pm_config.cuh"
+#include "grav_config_file.h"
 
 #include <cuda_runtime.h>
 #include <thrust/device_ptr.h>
@@ -498,6 +499,7 @@ static double simpson_factor(double a0, double a1, int p_pow,
 }  // namespace
 
 int main(int argc, char** argv) {
+  grav_cfg::apply_cli_and_env_config(argc, argv);
   if (argc < 4) {
     std::fprintf(stderr, "Usage: %s <ic.bin> <out.bin> <a_end>\n", argv[0]);
     return 1;

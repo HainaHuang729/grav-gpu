@@ -1,18 +1,6 @@
-#include "config.h"
+#include "grav_pm_compat.h"
 #include "grav_cuda_pm_mpi.h"
 #include "grav_pm_config.cuh"
-
-#ifndef SWIFT_KERNEL_LONG_GRAVITY_H
-#ifndef restrict
-#define restrict __restrict__
-#define GRAV_PM_MPI_LOCAL_RESTRICT
-#endif
-#include "kernel_long_gravity.h"
-#ifdef GRAV_PM_MPI_LOCAL_RESTRICT
-#undef restrict
-#undef GRAV_PM_MPI_LOCAL_RESTRICT
-#endif
-#endif
 
 #include <cuda_runtime.h>
 #include <cufft.h>

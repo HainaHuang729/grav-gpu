@@ -77,7 +77,7 @@ python3 scripts/make_figures.py
 
 - **CUDA Toolkit >= 12.x** (`nvcc` + `libcufft`), `g++` (C++17 + OpenMP), `make`, and Python 3 with `numpy` (+ `h5py` for HDF5 conversion).
 - **For building the full gravity & PM targets (`make engine pm`)**: a configured upstream GPU SWIFT source/build directory `KERNEL_BUILD_DIR` containing `config.h` and `src/{runner_gpu.h,runner_gpu.c,gpu_gravity_offload.cu,gpu_gravity_functions.cuh,kernel_gravity.h,kernel_long_gravity.h,gravity_derivatives.h,multipole.h}` (upstream GPLv3 headers are intentionally not vendored in this MIT repository).
-- **Standalone CUDA FoF / C99 CIC / 3D Domain / Full-GPU Hydro targets (`make fof cic hydro test-domain3d test-fof`) require zero upstream SWIFT headers.**
+- **Standalone CUDA FoF / PM / MPI-PM / C99 CIC / 3D Domain / Full-GPU Hydro & Cosmo-Hydro targets (`make fof pm pm-mpi cic hydro cosmo-hydro test-config test-domain3d test-fof`) require zero upstream SWIFT headers.**
 
 ### Option A: Zero-Dependency Standalone Build & FoF GPU Smoke Test
 
@@ -124,7 +124,9 @@ Ready-to-use `monofonIC` (2LPT/3LPT) and `MUSIC` (Zoom-in multi-mass) templates 
 
 ---
 
-## Runtime Environment Variables (`multi_gpu_slab`)
+## Runtime Configuration (`--config` INI File or `GRAV_*` Env Vars)
+
+All drivers (`multi_gpu_slab`, `grav_mpi`, `grav_hydro`, `grav_cosmo_hydro`) accept a clean INI/TOML-style parameter file via `--config configs/run_example.ini` (or `GRAV_CONFIG=...`); explicit `GRAV_*` environment variables always override file values for effortless Slurm sweeps.
 
 | Variable | Default | Description & Notes |
 | --- | --- | --- |

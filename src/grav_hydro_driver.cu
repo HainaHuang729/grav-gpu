@@ -1,4 +1,5 @@
 #include "grav_cuda_hydro.h"
+#include "grav_config_file.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +28,7 @@ static int env_int(const char* name, int def) {
 }
 
 int main(int argc, char** argv) {
+  grav_cfg::apply_cli_and_env_config(argc, argv);
   if (argc < 4) {
     std::fprintf(stderr, "Usage: %s <ic.bin> <out.bin> <t_end>\n", argv[0]);
     return 1;

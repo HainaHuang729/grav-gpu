@@ -59,13 +59,15 @@ $(BUILD_DIR):
 
 fof: $(BUILD_DIR)/grav_cuda_fof.so
 
-$(BUILD_DIR)/grav_hydro: src/grav_hydro_driver.cu src/grav_cuda_hydro.cu src/grav_cuda_hydro.h | $(BUILD_DIR)
+$(BUILD_DIR)/grav_hydro: src/grav_hydro_driver.cu src/grav_cuda_hydro.cu src/grav_cuda_hydro.h src/grav_config_file.h | $(BUILD_DIR)
 	$(NVCC) $(NVCC_COMMON) -Isrc src/grav_hydro_driver.cu src/grav_cuda_hydro.cu -o $@
 
 hydro: $(BUILD_DIR)/grav_hydro
 
-$(BUILD_DIR)/grav_cosmo_hydro: src/grav_cosmo_hydro.cu src/grav_cuda_pm.cu src/grav_cuda_pm.h src/grav_pm_config.cuh src/grav_neutrino.cuh src/grav_fr_gravity.cuh | $(BUILD_DIR)
-	$(NVCC) $(NVCC_COMMON) -DGADGET2_LONG_RANGE_CORRECTION -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -Isrc -I$(MATHLIB_INC) -L$(MATHLIB_LIB) \
+KERNEL_INC_OPT := $(if $(KERNEL_BUILD_DIR),-I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src,)
+
+$(BUILD_DIR)/grav_cosmo_hydro: src/grav_cosmo_hydro.cu src/grav_cuda_pm.cu src/grav_cuda_pm.h src/grav_pm_compat.h src/grav_pm_config.cuh src/grav_config_file.h src/grav_neutrino.cuh src/grav_fr_gravity.cuh | $(BUILD_DIR)
+	$(NVCC) $(NVCC_COMMON) -Isrc $(KERNEL_INC_OPT) -I$(MATHLIB_INC) -L$(MATHLIB_LIB) \
 		src/grav_cosmo_hydro.cu src/grav_cuda_pm.cu -lcufft -o $@
 
 cosmo-hydro: $(BUILD_DIR)/grav_cosmo_hydro
@@ -73,18 +75,18 @@ cosmo-hydro: $(BUILD_DIR)/grav_cosmo_hydro
 $(BUILD_DIR)/grav_cuda_fof.so: src/grav_cuda_fof.cu src/grav_cuda_fof.h | $(BUILD_DIR)
 	$(NVCC) $(NVCC_COMMON) -Xcompiler "-fPIC -fopenmp" -shared -Isrc src/grav_cuda_fof.cu -o $@
 
-pm: check-kernels $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_dist.o
+pm: $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_dist.o
 
-pm-mpi: check-kernels $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_mpi.o
+pm-mpi: $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_mpi.o
 
-$(BUILD_DIR)/grav_cuda_pm.o: src/grav_cuda_pm.cu src/grav_cuda_pm.h src/grav_pm_config.cuh src/grav_neutrino.cuh | $(BUILD_DIR)
-	$(NVCC) $(NVCC_COMMON) -Xcompiler -fPIC -c -Isrc -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -I$(MATHLIB_INC) src/grav_cuda_pm.cu -o $@
+$(BUILD_DIR)/grav_cuda_pm.o: src/grav_cuda_pm.cu src/grav_cuda_pm.h src/grav_pm_compat.h src/grav_pm_config.cuh src/grav_neutrino.cuh | $(BUILD_DIR)
+	$(NVCC) $(NVCC_COMMON) -Xcompiler -fPIC -c -Isrc $(KERNEL_INC_OPT) -I$(MATHLIB_INC) src/grav_cuda_pm.cu -o $@
 
-$(BUILD_DIR)/grav_cuda_pm_dist.o: src/grav_cuda_pm_dist.cu src/grav_cuda_pm_dist.h src/grav_pm_config.cuh src/grav_neutrino.cuh | $(BUILD_DIR)
-	$(NVCC) $(NVCC_COMMON) -Xcompiler -fPIC -c -Isrc -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -I$(MATHLIB_INC) src/grav_cuda_pm_dist.cu -o $@
+$(BUILD_DIR)/grav_cuda_pm_dist.o: src/grav_cuda_pm_dist.cu src/grav_cuda_pm_dist.h src/grav_pm_compat.h src/grav_pm_config.cuh src/grav_neutrino.cuh | $(BUILD_DIR)
+	$(NVCC) $(NVCC_COMMON) -Xcompiler -fPIC -c -Isrc $(KERNEL_INC_OPT) -I$(MATHLIB_INC) src/grav_cuda_pm_dist.cu -o $@
 
-$(BUILD_DIR)/grav_cuda_pm_mpi.o: src/grav_cuda_pm_mpi.cu src/grav_cuda_pm_mpi.h src/grav_mpi_comm.h src/grav_pm_config.cuh src/grav_neutrino.cuh | $(BUILD_DIR)
-	$(NVCC) -O3 -std=c++17 -arch=$(CUDA_ARCH) --fmad=true -ccbin=$(MPICXX) -Xcompiler -fPIC -c -Isrc -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -I$(MATHLIB_INC) src/grav_cuda_pm_mpi.cu -o $@
+$(BUILD_DIR)/grav_cuda_pm_mpi.o: src/grav_cuda_pm_mpi.cu src/grav_cuda_pm_mpi.h src/grav_pm_compat.h src/grav_mpi_comm.h src/grav_pm_config.cuh src/grav_neutrino.cuh | $(BUILD_DIR)
+	$(NVCC) -O3 -std=c++17 -arch=$(CUDA_ARCH) --fmad=true -ccbin=$(MPICXX) -Xcompiler -fPIC -c -Isrc $(KERNEL_INC_OPT) -I$(MATHLIB_INC) src/grav_cuda_pm_mpi.cu -o $@
 
 cic: $(BUILD_DIR)/libcic_deposit.so
 
@@ -124,6 +126,12 @@ $(BUILD_DIR)/test_p3_b2: scripts/test_p3_b2.cpp src/grav_timestep_p3.cuh src/gra
 
 test-p3-b2: $(BUILD_DIR)/test_p3_b2
 	./$(BUILD_DIR)/test_p3_b2
+
+$(BUILD_DIR)/test_config_v3: scripts/test_config_v3.cpp src/grav_config_file.h src/grav_physics_stage.cuh src/grav_neutrino.cuh | $(BUILD_DIR)
+	$(CXX) -O2 -std=c++17 -Wall -Wextra -Werror -Isrc scripts/test_config_v3.cpp -o $@
+
+test-config: $(BUILD_DIR)/test_config_v3
+	./$(BUILD_DIR)/test_config_v3
 
 test-zoomin:
 	python3 scripts/zoomin_pipeline.py generate $(BUILD_DIR)/zoom_test.bin --soft-out $(BUILD_DIR)/zoom_test.soft.bin --n-eff 2048 --hr-half-width 0.35

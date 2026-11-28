@@ -29,6 +29,8 @@
 #include "grav_cuda_pm.h"
 #include "grav_cuda_pm_dist.h"
 #include "grav_pm_config.cuh"
+#include "grav_config_file.h"
+#include "grav_physics_stage.cuh"
 #include "grav_timestep_p3.cuh"
 #include "grav_sidm.cuh"
 #include "grav_cuda_fof.h"
@@ -79,53 +81,7 @@ struct Meta {
   unsigned int nodes;
 };
 
-struct Physics {
-  double a_begin, log_span;
-  float box, split, cutoff, G;
-  Tick pm_span, short_span_cap;
-  float short_step_factor, mac_tolerance;
-  double dt_max, rms_length, max_dt_RMS_factor;
-  bool dynamic_pm;
-  double hubble0, omega_m, omega_de, omega_r, omega_k, w0, wa;
-  float theta, grav_eta;
-  bool periodic, comoving;
-  float ext_M, ext_a, ext_cx, ext_cy, ext_cz;
-  double omega_nu = 0.0, nu_m_each_ev = 0.0;
-  int p3_tidal = 0, p3_sync = 0, p3_hyst = 0;
-  float p3_tidal_eta = 0.05f, p3_vel_eta = 0.25f;
-  __host__ __device__ double scale(Tick ti) const {
-    return comoving ? (a_begin * exp(log_span * (double(ti) / timeline))) : 1.0;
-  }
-  __host__ __device__ double time_at(Tick ti) const {
-    return comoving ? scale(ti) : (a_begin + log_span * (double(ti) / timeline));
-  }
-  __host__ __device__ double H(double a) const {
-    if (!comoving) return 1.0;
-    const double inv_a = 1.0 / a;
-    const double a2 = inv_a * inv_a;
-    const double a3 = a2 * inv_a;
-    const double a4 = a2 * a2;
-    double de_fac = 1.0;
-    if (w0 != -1.0 || wa != 0.0) {
-      de_fac = pow(a, -3.0 * (1.0 + w0 + wa)) * exp(-3.0 * wa * (1.0 - a));
-    }
-    double matter_term = omega_m * a3;
-    if (omega_nu > 0.0) {
-      const double om_cb = omega_m - omega_nu;
-      matter_term = om_cb * a3 + omega_nu * a3 * grav_nu_rho_enhancement(a, nu_m_each_ev);
-    }
-    return hubble0 * sqrt(omega_r * a4 + matter_term + omega_k * a2 + omega_de * de_fac);
-  }
-  __host__ __device__ double factors(Tick lo, Tick hi, bool drift) const {
-    if (lo == hi) return 0.0;
-    if (!comoving) return log_span * (double(hi - lo) / timeline);
-    const double a = scale(lo), b = scale(hi), m = (a + b) * 0.5;
-    const double da = drift ? a * a * a : a * a;
-    const double dm = drift ? m * m * m : m * m;
-    const double db = drift ? b * b * b : b * b;
-    return (b - a) / 6.0 * (1.0 / (da * H(a)) + 4.0 / (dm * H(m)) + 1.0 / (db * H(b)));
-  }
-};
+using Physics = GravPhysics;
 
 struct ForceNode {
   float4 center;
@@ -3547,6 +3503,7 @@ __global__ void gather_fc_samples_kernel(
 #include "grav_domain_3d_mpi.cuh"
 
 int main(int argc, char** argv) {
+  grav_cfg::apply_cli_and_env_config(argc, argv);
 #ifdef GRAV_ENABLE_MPI
   MPI_Init(&argc, &argv);
   grav_mpi::GravMpiCtx mpi_ctx;

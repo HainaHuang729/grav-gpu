@@ -1,20 +1,6 @@
-#include "config.h"
+#include "grav_pm_compat.h"
 #include "grav_cuda_pm.h"
 #include "grav_pm_config.cuh"
-
-// Read the split choice from SWIFT's source header in both standalone and
-// integrated builds, even when that header is not in the include chain yet.
-#ifndef SWIFT_KERNEL_LONG_GRAVITY_H
-#ifndef restrict
-#define restrict __restrict__
-#define GRAV_PM_LOCAL_RESTRICT
-#endif
-#include "kernel_long_gravity.h"
-#ifdef GRAV_PM_LOCAL_RESTRICT
-#undef restrict
-#undef GRAV_PM_LOCAL_RESTRICT
-#endif
-#endif
 
 #include <cuda_runtime.h>
 #include <cufft.h>
