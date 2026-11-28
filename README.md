@@ -143,6 +143,9 @@ Ready-to-use `monofonIC` (2LPT/3LPT) and `MUSIC` (Zoom-in multi-mass) templates 
 | `GRAV_NU_MASS_EV` | `0.0` | Total neutrino mass $\sum m_\nu$ in eV (`> 0` activates $k$-space linear-response neutrino boost $W_\nu(k,a)$ & Komatsu+2011 Fermi–Dirac background $H(a)$ with zero extra VRAM) |
 | `GRAV_NU_NSPECIES` | `3` | Number of degenerate massive neutrino species when `GRAV_NU_MASS_EV > 0` |
 | `GRAV_NU_TABLE` | unset | Optional 2D `(a, k [1/Mpc], R_nu)` ASCII/CSV transfer table from `CLASS`/`CAMB` (resampled to 256 log-$k$ GPU bins per step) |
+| `GRAV_TIDAL_TIMESTEP` / `GRAV_SYNC_STEP` | `0` (`1` in `high`) / `0` | P3 dynamical/tidal + softening-crossing timestepping (`GRAV_TIDAL_ETA=0.05`, `GRAV_VEL_ETA=0.25`) and synchronous global-rung symplectic mode (`7.64e-7` Plummer drift) |
+| `GRAV_SIDM_SIGMA_M` / `GRAV_SIDM_W0` | `0.0` / `0.0` | B2-a GPU-native octree-leaf MC-SIDM elastic cross section $\sigma_0/m$ ($\text{cm}^2/\text{g}$, or `GRAV_SIDM_SIGMA_INTERNAL` in code units) and optional velocity scale $w_0$ (km/s), search radius `GRAV_SIDM_HS` |
+| `GRAV_FR0` / `GRAV_FR_SCREENING` | `0.0` / `1` | B2-b Hu–Sawicki $n=1$ $f(R)$ modified gravity amplitude $|f_{R0}|$ (e.g. `1e-4`, `1e-5`) and thin-shell chameleon screening toggle |
 | `GRAV_SPLIT_FORCE` | `1` (periodic) | Split traversal / M2P / M2L / P2P kernels (required for 3D domain modes) |
 | `GRAV_LAZY_TREE` | `1` (periodic) | Lazy node refit across active sub-steps |
 | `GRAV_REBALANCE_INTERVAL` | `8` | Rebalance cadence in steps for 3D domains (`0` disables live rebalancing) |

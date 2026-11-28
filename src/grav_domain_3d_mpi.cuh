@@ -162,6 +162,8 @@ inline int run_domain_3d_mpi_evolution(
 
   const GravPmConfig pm_cfg = grav_pm_get_config();
   const GravNuConfig nu_cfg = grav_nu_init_from_env(cfg.cosmo_h0, cfg.cosmo_om);
+  const GravFrConfig fr_cfg = grav_fr_init_from_env(cfg.cosmo_h0, cfg.cosmo_om, cfg.cosmo_ode);
+  (void)fr_cfg;
   const int pm_halo_lo = grav_pm_x_halo_lo(pm_cfg.order, pm_cfg.interlace);
   const int pm_halo_hi = grav_pm_x_halo_hi(pm_cfg.order, pm_cfg.interlace);
   if (my_rank == 0) {
@@ -1096,6 +1098,7 @@ inline int run_domain_3d_mpi_evolution(
       if (is_pm_step) {
         const double t_pm0 = wall();
         grav_nu_update_step(a, H_cur);
+        grav_fr_update_step(a);
         const int pm_passes = pm_cfg.interlace ? 2 : 1;
         const float pm_scale = pm_cfg.interlace ? 0.5f : 1.0f;
         for (int pm_pass = 0; pm_pass < pm_passes; ++pm_pass) {

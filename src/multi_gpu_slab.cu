@@ -29,6 +29,8 @@
 #include "grav_cuda_pm.h"
 #include "grav_cuda_pm_dist.h"
 #include "grav_pm_config.cuh"
+#include "grav_timestep_p3.cuh"
+#include "grav_sidm.cuh"
 #include "grav_cuda_fof.h"
 #include "grav_domain_3d.h"
 #ifdef GRAV_ENABLE_MPI
@@ -89,6 +91,8 @@ struct Physics {
   bool periodic, comoving;
   float ext_M, ext_a, ext_cx, ext_cy, ext_cz;
   double omega_nu = 0.0, nu_m_each_ev = 0.0;
+  int p3_tidal = 0, p3_sync = 0, p3_hyst = 0;
+  float p3_tidal_eta = 0.05f, p3_vel_eta = 0.25f;
   __host__ __device__ double scale(Tick ti) const {
     return comoving ? (a_begin * exp(log_span * (double(ti) / timeline))) : 1.0;
   }
@@ -1722,22 +1726,40 @@ __global__ void __launch_bounds__(team, uniform_soft ? 8 : 6) eval_p2p_split_ker
   }
 }
 
-__device__ unsigned char next_bin(float3 raw, const float3 mesh, float eps,
+__device__ unsigned char next_bin(float3 raw, float raw_pot, const float3 mesh, float3 vel, float eps,
     Tick ti, unsigned char previous, Physics p, double a, double H, bool initial,
     float dt_rms, Tick span_cap) {
+  if (p.p3_sync) {
+    Tick span = span_cap;
+    if (p.dt_max > 0.0) {
+      const double ft = p.dt_max * timeline / p.log_span;
+      const Tick trial = Tick(fmin(double(span_cap), fmax(4.0, ft)));
+      span = 1ULL << (63 - __clzll(trial));
+    }
+    return 62 - __clzll(span);
+  }
   const double a_inv2 = p.comoving ? (1.0 / (a * a)) : 1.0;
   float ax = raw.x * p.G * a_inv2, ay = raw.y * p.G * a_inv2, az = raw.z * p.G * a_inv2;
   ax += mesh.x * a_inv2; ay += mesh.y * a_inv2; az += mesh.z * a_inv2;
   const float ac2 = ax * ax + ay * ay + az * az;
-  const float inv = ac2 > 0.f ? 1.f / sqrtf(ac2) : FLT_MAX;
+  const float ac_mag = sqrtf(ac2);
+  const float inv = ac2 > 0.f ? 1.f / ac_mag : FLT_MAX;
+  const float eps_pl = eps * kernel_gravity_softening_plummer_equivalent_inv;
+  const float v_phys_mag = sqrtf(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z) / (p.comoving ? float(a) : 1.f);
+  const float abs_pot_phys = fabsf(raw_pot * p.G) / (p.comoving ? float(a) : 1.f);
   float dt;
   if (p.comoving) {
-    dt = sqrtf(2.f * kernel_gravity_softening_plummer_equivalent_inv * float(a) * p.grav_eta * eps * inv);
-    dt = fminf(dt, dt_rms);
+    float dt_phys = sqrtf(2.f * float(a) * p.grav_eta * eps_pl * inv);
+    dt_phys = grav_p3_dt_limit(dt_phys, ac_mag, abs_pot_phys, v_phys_mag, eps_pl * float(a),
+                               p.p3_tidal, p.p3_tidal_eta, p.p3_vel_eta);
+    dt = fminf(dt_phys, dt_rms);
     dt *= float(H) * p.short_step_factor;
     if (p.dynamic_pm) dt = fminf(dt, float(p.dt_max));
   } else {
-    dt = sqrtf(2.f * kernel_gravity_softening_plummer_equivalent_inv * p.grav_eta * eps * inv) * p.short_step_factor;
+    float dt_phys = sqrtf(2.f * p.grav_eta * eps_pl * inv);
+    dt_phys = grav_p3_dt_limit(dt_phys, ac_mag, abs_pot_phys, v_phys_mag, eps_pl,
+                               p.p3_tidal, p.p3_tidal_eta, p.p3_vel_eta);
+    dt = dt_phys * p.short_step_factor;
     if (p.dt_max > 0.0) dt = fminf(dt, float(p.dt_max));
   }
   const double fractional_ticks = double(dt) * timeline / p.log_span;
@@ -1746,6 +1768,7 @@ __device__ unsigned char next_bin(float3 raw, const float3 mesh, float eps,
   if (!initial) {
     const Tick old = bin_size(previous);
     if (span > 2 * old) span = 2 * old;
+    if (p.p3_hyst && span > old && fractional_ticks < 1.10 * double(span)) span = old;
     if (span > old && (ti & (span - 1))) span = old;
   }
   return 62 - __clzll(span);
@@ -1800,7 +1823,7 @@ __global__ void integrate_slab(float3* velocity, float* old_acc_arr, unsigned ch
     old_acc_arr[i] = oa;
     if (ti != timeline) {
       const float part_soft = soft_arr ? soft_arr[i] : uniform_soft;
-      const unsigned char b = next_bin({f.x, f.y, f.z}, am, part_soft, ti, old, p, a, H, !ti, dt_rms, span_cap);
+      const unsigned char b = next_bin({f.x, f.y, f.z}, f.w, am, v, part_soft, ti, old, p, a, H, !ti, dt_rms, span_cap);
       bins[i] = b;
       next = ti + bin_size(b);
       v.x += p.G * f.x * begin[b];
@@ -3819,6 +3842,9 @@ int main(int argc, char** argv) {
     const double cosmo_w0 = w0_env ? std::stod(w0_env) : -1.0;
     const double cosmo_wa = wa_env ? std::stod(wa_env) : 0.0;
     const GravNuConfig nu_cfg = grav_nu_init_from_env(cosmo_h0, cosmo_om);
+    const GravFrConfig fr_cfg = grav_fr_init_from_env(cosmo_h0, cosmo_om, cosmo_ode);
+    const GravSidmConfig sidm_cfg = grav_sidm_init_from_env();
+    const GravP3Config p3_cfg = grav_p3_parse_env(high_prec ? 1 : 0);
     const float theta_val = theta_env ? std::stof(theta_env) : (high_prec ? 0.25f : theta_default);
     const float grav_eta_val = grav_eta_env ? std::stof(grav_eta_env) : grav_eta_default;
     const int leaf_limit = leaf_override ? std::stoi(leaf_override) : 64;
@@ -4500,6 +4526,22 @@ int main(int argc, char** argv) {
                     nu_cfg.sum_m_nu_ev, nu_cfg.n_species, nu_cfg.omega_nu0, nu_cfg.f_nu,
                     nu_cfg.table_path.empty() ? "linear_response_analytic" : nu_cfg.table_path.c_str());
       }
+      if (fr_cfg.f_R0 > 0.0) {
+        std::printf("FR_CONFIG f_R0=%.6g screening=%d\n", fr_cfg.f_R0, fr_cfg.screening);
+      }
+      std::fflush(stdout);
+    }
+    if (p3_cfg.tidal_timestep || p3_cfg.sync_step) {
+      std::printf("P3_CONFIG tidal=%d tidal_eta=%.4f vel_eta=%.4f sync_step=%d hyst=%d\n",
+                  p3_cfg.tidal_timestep, p3_cfg.tidal_eta, p3_cfg.vel_eta,
+                  p3_cfg.sync_step, p3_cfg.rung_hysteresis);
+      std::fflush(stdout);
+    }
+    if (sidm_cfg.sigma_m_internal > 0.0) {
+      std::printf("SIDM_CONFIG sigma_cm2_g=%.6g sigma_internal=%.6g w0_kms=%.4f hs=%.6g seed=%llu\n",
+                  sidm_cfg.sigma_m_cm2_g, sidm_cfg.sigma_m_internal, sidm_cfg.w0_kms,
+                  sidm_cfg.hs_override > 0.0 ? sidm_cfg.hs_override : double(first_soft_plummer),
+                  (unsigned long long)sidm_cfg.seed);
       std::fflush(stdout);
     }
 
@@ -4549,7 +4591,9 @@ int main(int argc, char** argv) {
         theta_val, grav_eta_val,
         periodic, comoving,
         ext_M_val, ext_a_val, float(ext_c_perm.x), float(ext_c_perm.y), float(ext_c_perm.z),
-        nu_cfg.omega_nu0, nu_cfg.m_each_ev};
+        nu_cfg.omega_nu0, nu_cfg.m_each_ev,
+        p3_cfg.tidal_timestep, p3_cfg.sync_step, p3_cfg.rung_hysteresis,
+        p3_cfg.tidal_eta, p3_cfg.vel_eta};
     if (comoving) {
       const double Ha0 = p.H(h.initial_scale);
       const double Ha1 = p.H(a_end);
@@ -4754,6 +4798,15 @@ int main(int argc, char** argv) {
       for (int g = 0; g < num_gpus; ++g) {
         check(cudaSetDevice(g));
         check(cudaMalloc(&d_energy_accum[g], 10 * sizeof(double)));
+      }
+      check(cudaSetDevice(0));
+    }
+    std::vector<GravSidmStats*> d_sidm_stats(num_gpus, nullptr);
+    if (sidm_cfg.sigma_m_internal > 0.0) {
+      for (int g = 0; g < num_gpus; ++g) {
+        check(cudaSetDevice(g));
+        check(cudaMalloc(&d_sidm_stats[g], sizeof(GravSidmStats)));
+        check(cudaMemset(d_sidm_stats[g], 0, sizeof(GravSidmStats)));
       }
       check(cudaSetDevice(0));
     }
@@ -5466,7 +5519,10 @@ int main(int argc, char** argv) {
         // ================= STEP B: Multi-GPU Resident PM =================
         if (periodic && is_pm_step) {
           const double t_pm0 = wall();
-          if (g == 0) grav_nu_update_step(a, H_cur);
+          if (g == 0) {
+            grav_nu_update_step(a, H_cur);
+            grav_fr_update_step(a);
+          }
 #pragma omp barrier
           const int pm_passes = pm_cfg.interlace ? 2 : 1;
           const float pm_scale = pm_cfg.interlace ? 0.5f : 1.0f;
@@ -5961,6 +6017,25 @@ int main(int argc, char** argv) {
           slab_active_next[s] = slab_stats.next;
           slab_invalid[s] = slab_stats.invalid;
           slab_xfer_ms[s] = 0.0;
+          if (sidm_cfg.sigma_m_internal > 0.0 && ti > previous && !is_final &&
+              ns > 1 && G.trees[ls].nodes > 0) {
+            const double dt_kick_step = p.factors(previous, ti, false);
+            const double dt_phys_sidm = comoving ? (a * a * dt_kick_step) : dt_kick_step;
+            const double hs_base = (sidm_cfg.hs_override > 0.0) ? sidm_cfg.hs_override : double(first_soft_plummer);
+            const double hs_phys = comoving ? (a * hs_base) : hs_base;
+            const int n_nodes_sidm = int(G.trees[ls].nodes);
+            const int sidm_blocks = (n_nodes_sidm + 3) / 4;
+            const uint64_t step_seed = sidm_cfg.seed
+                ^ (uint64_t(global_iteration) * 0x9e3779b97f4a7c15ULL)
+                ^ (uint64_t(s) * 0xbf58476d1ce4e5b9ULL);
+            sidm_scatter_leaves_kernel<<<sidm_blocks, 128, 0, G.compute_stream>>>(
+                G.trees[ls].geometry.p, G.trees[ls].order.p, S.d_x.p, S.d_v.p,
+                mass_uniform ? nullptr : S.d_mass.p, first_mass,
+                n_nodes_sidm, h.box, periodic, a, comoving, dt_phys_sidm,
+                sidm_cfg.sigma_m_internal, sidm_cfg.w0_kms, hs_phys,
+                step_seed, d_sidm_stats[g]);
+            check(cudaGetLastError());
+          }
           if (lazy_tree_enabled && !is_final && ns > 0) {
             const int n_grid_v = blocks(int(G.trees[ls].node_cap));
             for (int depth = tree_levels; depth >= 0; --depth) {
@@ -6543,6 +6618,27 @@ int main(int argc, char** argv) {
     }
 
     join_snap_writer();
+
+    if (sidm_cfg.sigma_m_internal > 0.0) {
+      unsigned long long tot_scatters = 0, tot_tested = 0;
+      double max_p = 0.0, tot_dE = 0.0;
+      for (int g = 0; g < num_gpus; ++g) {
+        GravSidmStats hs{};
+        check(cudaSetDevice(g));
+        check(cudaMemcpy(&hs, d_sidm_stats[g], sizeof(GravSidmStats), cudaMemcpyDeviceToHost));
+        check(cudaFree(d_sidm_stats[g]));
+        tot_scatters += hs.n_scatters;
+        tot_tested += hs.n_pairs_tested;
+        if (hs.max_prob > max_p) max_p = hs.max_prob;
+        tot_dE += hs.sum_dE_kin;
+      }
+      check(cudaSetDevice(0));
+      std::cout << std::setprecision(12)
+                << "SIDM_STATS {\"scatters\":" << tot_scatters
+                << ",\"pairs_tested\":" << tot_tested
+                << ",\"max_prob\":" << max_p
+                << ",\"sum_dE_kin\":" << tot_dE << "}" << std::endl;
+    }
 
     if (force0_out_path) {
       FILE* fp = fopen(force0_out_path, "wb");

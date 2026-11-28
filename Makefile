@@ -108,6 +108,12 @@ test-pm-precision: $(BUILD_DIR)/test_pm_precision
 test-neutrino: $(BUILD_DIR)/test_neutrino_b1
 	./$(BUILD_DIR)/test_neutrino_b1
 
+$(BUILD_DIR)/test_p3_b2: scripts/test_p3_b2.cpp src/grav_timestep_p3.cuh src/grav_fr_gravity.cuh src/grav_sidm.cuh | $(BUILD_DIR)
+	$(CXX) -O2 -std=c++17 -Wall -Wextra -Werror -Isrc $< -o $@
+
+test-p3-b2: $(BUILD_DIR)/test_p3_b2
+	./$(BUILD_DIR)/test_p3_b2
+
 $(BUILD_DIR)/test_neutrino_b1: scripts/test_neutrino_b1.cpp src/grav_neutrino.cuh | $(BUILD_DIR)
 	$(CXX) -O2 -std=c++17 -Wall -Wextra -Werror -Isrc scripts/test_neutrino_b1.cpp -o $@
 

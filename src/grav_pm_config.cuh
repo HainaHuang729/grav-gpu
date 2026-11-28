@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include "grav_neutrino.cuh"
+#include "grav_fr_gravity.cuh"
 
 struct GravPmConfig {
   int order = 2;           // 2 = CIC (default), 3 = TSC, 4 = PCS

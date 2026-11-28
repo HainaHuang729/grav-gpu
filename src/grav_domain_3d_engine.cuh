@@ -1557,6 +1557,8 @@ inline int run_domain_3d_evolution(
 
   const GravPmConfig pm_cfg = grav_pm_get_config();
   const GravNuConfig nu_cfg = grav_nu_init_from_env(cfg.cosmo_h0, cfg.cosmo_om);
+  const GravFrConfig fr_cfg = grav_fr_init_from_env(cfg.cosmo_h0, cfg.cosmo_om, cfg.cosmo_ode);
+  (void)fr_cfg;
   const int pm_halo_lo = grav_pm_x_halo_lo(pm_cfg.order, pm_cfg.interlace);
   const int pm_halo_hi = grav_pm_x_halo_hi(pm_cfg.order, pm_cfg.interlace);
   std::printf("PM_CONFIG order=%d interlace=%d grad=%s asmth=%.4f rcut=%.2f high_prec=%d halo=[-%d,+%d]\n",
@@ -2692,7 +2694,10 @@ inline int run_domain_3d_evolution(
         // ================= STEP B: Distributed PM =================
         if (is_pm_step) {
           const double t_pm0 = wall();
-          if (g == 0) grav_nu_update_step(a, H_cur);
+          if (g == 0) {
+            grav_nu_update_step(a, H_cur);
+            grav_fr_update_step(a);
+          }
 #pragma omp barrier
           if (cfg.pm_dist_enabled) {
             dist_pm.begin_deposit(g);

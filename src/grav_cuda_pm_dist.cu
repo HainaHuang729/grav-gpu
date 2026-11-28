@@ -296,7 +296,8 @@ __global__ void dist_filter_kernel(
     double box,
     double split,
     int order,
-    GravNuStepParams nu) {
+    GravNuStepParams nu,
+    GravFrStepParams fr) {
   const size_t total = size_t(ny_g) * nz_c * n;
   const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
   if (i >= total) return;
@@ -323,9 +324,10 @@ __global__ void dist_filter_kernel(
   const double cic = dist_inverse_sinc(kx, n) * dist_inverse_sinc(ky, n) * dist_inverse_sinc(kz, n);
   const double deconv = grav_pm_deconv_weight(cic, order);
   double weight = (-1.0 / (dist_pm_pi * box)) * window / (k2 + FLT_MIN) * deconv;
-  if (nu.enabled) {
+  if (nu.enabled || fr.enabled) {
     const double k_phys = (2.0 * dist_pm_pi / box) * sqrt(k2);
-    weight *= grav_nu_pm_boost(k_phys, nu);
+    if (nu.enabled) weight *= grav_nu_pm_boost(k_phys, nu);
+    if (fr.enabled) weight *= grav_fr_pm_boost(k_phys, fr);
   }
   modes[i].x *= weight;
   modes[i].y *= weight;
@@ -981,8 +983,9 @@ void GravDistPm::solve_and_gather(double box, double split, int slot) {
       CHECK_CUFFT(cufftExecZ2Z(im.plan_1d_z2z[g], im.buf1[g], im.buf1[g], CUFFT_FORWARD));
       const size_t total = size_t(im.ny[g]) * nz_c * n;
       const auto nu_sp = grav_nu_get_step_params();
+      const auto fr_sp = grav_fr_get_step_params();
       dist_filter_kernel<<<blocks_for(total), dist_pm_block, 0, im.streams[g]>>>(
-          im.buf1[g], im.splits.y0[g], im.ny[g], n, nz_c, box, split, cfg.order, nu_sp);
+          im.buf1[g], im.splits.y0[g], im.ny[g], n, nz_c, box, split, cfg.order, nu_sp, fr_sp);
       CHECK_CUDA(cudaGetLastError());
     }
 

@@ -1,0 +1,88 @@
+{
+  "generated_at": "2026-11-28",
+  "cluster": "phy-gpus (nodes b4/b6, NVIDIA GeForce RTX 4090, CUDA 12.6, OpenMPI 4.1.6)",
+  "unit_test": {
+    "binary": "scripts/test_p3_b2.cpp",
+    "p3_dt_dyn": 0.005,
+    "p3_dt_vel": 0.000125,
+    "fr_lambda_C_z0_mpc": 36.02,
+    "fr_G_eff_k0": 1.0,
+    "fr_G_eff_kinf": 1.333333,
+    "fr_S_screen_deep_pot": 0.1348,
+    "sidm_sigma_internal_per_cm2g": 2.088357e-06,
+    "sidm_sigma_at_w0_ratio": 0.25,
+    "result": "P3_B2_UNIT_TESTS_PASSED"
+  },
+  "gate_p3_adaptive_symplectic": {
+    "status": "PASSED",
+    "slurm_job_id": 492186,
+    "benchmark": "32K isolated equilibrium Plummer sphere (N=32768, G=1, M=1, a=1, soft=0.05, t=0->4.0)",
+    "config": "GRAV_PRECISION_MODE=high GRAV_TIDAL_TIMESTEP=1 GRAV_SYNC_STEP=1 GRAV_DT_MAX=0.004 GRAV_THETA=0.25 GRAV_MAC=1e-4",
+    "baseline_max_rel_dE": 1.15e-05,
+    "baseline_max_P": 6.38e-06,
+    "p3_max_rel_dE": 7.6397e-07,
+    "p3_final_rel_dE": 7.6397e-07,
+    "p3_max_P": 2.4412e-06,
+    "virial_ratio_range": [0.9956, 0.9989],
+    "energy_improvement_vs_baseline": "15.1x (1.15e-5 -> 7.64e-7)",
+    "gate_threshold_rel_dE": 1.0e-06
+  },
+  "gate_b2_beyond_lcdm": {
+    "status": "PASSED",
+    "b2a_gpu_mc_sidm": {
+      "kernel": "sidm_scatter_leaves_kernel (race-free warp round-robin tournament on VRAM-resident octree leaves)",
+      "benchmark": "32K isolated Hernquist halo (N=32768, G=1, M=1, a=1, soft=0.03)",
+      "moderate_run_job_492186": {
+        "t_end": 5.0,
+        "sigma_internal": 4.0,
+        "hs": 0.10,
+        "scatters": 6535,
+        "pairs_tested": 216598192,
+        "max_prob": 0.0008207,
+        "sum_dE_kin": 1.2659e-11,
+        "total_max_rel_dE": 2.6979e-06
+      },
+      "strong_gravothermal_run_job_492187": {
+        "t_end": 10.0,
+        "sigma_internal": 40.0,
+        "hs": 0.12,
+        "wall_s": 25,
+        "scatters": 107365,
+        "pairs_tested": 426552998,
+        "max_prob": 0.005169,
+        "sum_dE_kin": 9.3480e-12,
+        "total_max_rel_dE": 6.7133e-05,
+        "core_n_r025_cdm": 1865,
+        "core_n_r025_sidm": 2406,
+        "core_density_ratio_sidm_over_cdm": 1.2901,
+        "vdisp_core_cdm": 0.3668,
+        "vdisp_core_sidm": 0.3943,
+        "physical_regime": "gravothermal core-collapse onset (+29.0% central density, +7.5% core velocity dispersion, exact 1e-11 elastic kinetic conservation)"
+      }
+    },
+    "b2b_hu_sawicki_fr_gravity": {
+      "slurm_job_id": 492186,
+      "model": "Hu-Sawicki n=1 f(R) (|f_R0|=1e-4, GR vs F4, a=0.02->0.50)",
+      "scales": [
+        {
+          "regime": "GR limit (k << a * m_fR)",
+          "box_mpc": 2000.0,
+          "k_inv_mpc": 0.0031416,
+          "P_f4_over_gr_sim": 1.000357,
+          "P_f4_over_gr_ode": 1.000358,
+          "rel_err_pct": 0.0001
+        },
+        {
+          "regime": "fifth-force enhancement (k >> a * m_fR, G_eff -> 4/3 G)",
+          "box_mpc": 20.0,
+          "k_inv_mpc": 0.314159,
+          "P_f4_over_gr_sim": 1.239386,
+          "P_f4_over_gr_ode": 1.241613,
+          "rel_err_pct": 0.1794
+        }
+      ],
+      "max_rel_err_pct": 0.1794,
+      "gate_threshold_pct": 0.5
+    }
+  }
+}
