@@ -1,0 +1,137 @@
+{
+  "timestamp_utc": "2026-11-28T09:13:50Z",
+  "slurm_job_id": 492163,
+  "cluster": "phy-gpus",
+  "node": "b4",
+  "gpu_model": "NVIDIA GeForce RTX 4090 (sm_89, built sm_86)",
+  "status": "passed",
+  "unit_test_pm_precision": {
+    "binary": "build/test_pm_precision",
+    "side": 64,
+    "wave_k_int": [10, 7, 5],
+    "all_12_configs_zero_self_force_max": 1.432e-14,
+    "all_12_configs_newton3_max_rel": 0.0,
+    "cic_fd4_wave_rms_rel": 6.237e-2,
+    "tsc_int_ik_wave_rms_rel": 1.522e-3,
+    "pcs_int_ik_wave_rms_rel": 1.765e-3,
+    "improvement_vs_cic_fd4": {
+      "tsc_int_ik": 41.0,
+      "pcs_int_ik": 35.3
+    }
+  },
+  "ewald_theta03_sweep": {
+    "source": "PL_25_256_0054.hdf5 stride-64 (N=262,144, a=0.85508432, PM_GRID=128, theta=0.3, FORCE_CHECK_N=4096)",
+    "gate_target_total_med_rel": 1.0e-4,
+    "runs": [
+      {
+        "order": 2,
+        "scheme": "CIC",
+        "interlace": 0,
+        "grad": "fd4",
+        "asmth": 1.25,
+        "short_med_rel": 1.1396e-4,
+        "total_med_rel": 1.0336e-3,
+        "total_p95_rel": 6.8690e-3,
+        "step8_total_med_rel": 9.9454e-4
+      },
+      {
+        "order": 3,
+        "scheme": "TSC",
+        "interlace": 0,
+        "grad": "fd4",
+        "asmth": 1.25,
+        "short_med_rel": 1.1396e-4,
+        "total_med_rel": 4.4793e-4,
+        "total_p95_rel": 2.7031e-3,
+        "step8_total_med_rel": 4.4971e-4
+      },
+      {
+        "order": 3,
+        "scheme": "TSC",
+        "interlace": 1,
+        "grad": "ik",
+        "asmth": 1.25,
+        "short_med_rel": 1.1396e-4,
+        "total_med_rel": 6.6779e-5,
+        "total_p95_rel": 5.7408e-4,
+        "step8_total_med_rel": 1.0113e-4
+      },
+      {
+        "order": 4,
+        "scheme": "PCS",
+        "interlace": 1,
+        "grad": "ik",
+        "asmth": 1.25,
+        "short_med_rel": 1.1396e-4,
+        "total_med_rel": 5.5823e-5,
+        "total_p95_rel": 5.6753e-4,
+        "step8_total_med_rel": 9.4892e-5
+      },
+      {
+        "order": 3,
+        "scheme": "TSC",
+        "interlace": 1,
+        "grad": "ik",
+        "asmth": 1.50,
+        "short_med_rel": 1.2745e-4,
+        "total_med_rel": 6.3913e-5,
+        "total_p95_rel": 6.7827e-4,
+        "step8_total_med_rel": 1.0637e-4
+      },
+      {
+        "order": 4,
+        "scheme": "PCS",
+        "interlace": 1,
+        "grad": "ik",
+        "asmth": 1.50,
+        "short_med_rel": 1.2745e-4,
+        "total_med_rel": 5.9563e-5,
+        "total_p95_rel": 6.7683e-4,
+        "step8_total_med_rel": 1.0451e-4
+      },
+      {
+        "order": 4,
+        "scheme": "PCS",
+        "interlace": 1,
+        "grad": "ik",
+        "asmth": 1.75,
+        "short_med_rel": 1.3653e-4,
+        "total_med_rel": 6.3167e-5,
+        "total_p95_rel": 7.4350e-4,
+        "step8_total_med_rel": 1.0991e-4
+      }
+    ],
+    "best_config": {
+      "order": 4,
+      "interlace": 1,
+      "grad": "ik",
+      "asmth": 1.25,
+      "total_med_rel": 5.5823e-5,
+      "improvement_vs_cic_fd4": 18.5
+    }
+  },
+  "mpi_2node_pm_verification": {
+    "slurm_job_id": 492167,
+    "nodes": "b[4,6]",
+    "ranks": 2,
+    "side": 128,
+    "cic_fd4": {
+      "max_rel_field": 1.031e-14,
+      "max_rel_pot": 3.177e-16,
+      "pm_comm_ms": 613.490,
+      "status": "passed"
+    },
+    "tsc_ik": {
+      "max_rel_field": 3.887e-16,
+      "max_rel_pot": 3.174e-16,
+      "pm_comm_ms": 826.625,
+      "status": "passed"
+    }
+  },
+  "runtime_smoke_256_3d_1gpu": {
+    "slurm_job_id": 492166,
+    "node": "b4",
+    "configs_completed_zero_error": ["CIC+fd4", "TSC+interlace+ik", "PCS+interlace+ik"],
+    "total_job_elapsed_s": 31
+  }
+}

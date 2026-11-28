@@ -25,9 +25,35 @@
         "intra_node_ghost_cells": 712,
         "inter_node_ghost_cells": 0,
         "status": "passed"
+      },
+      {
+        "config": "2N x 1G (b4+b6, CIC+fd4, Slurm 492167)",
+        "ranks": 2,
+        "nodes": 2,
+        "pm_order": 2,
+        "pm_grad": "fd4",
+        "max_rel_field": 1.031e-14,
+        "max_rel_pot": 3.177e-16,
+        "pm_comm_ms": 613.490,
+        "intra_node_ghost_cells": 0,
+        "inter_node_ghost_cells": 712,
+        "status": "passed"
+      },
+      {
+        "config": "2N x 1G (b4+b6, TSC+ik P1, Slurm 492167)",
+        "ranks": 2,
+        "nodes": 2,
+        "pm_order": 3,
+        "pm_grad": "ik",
+        "max_rel_field": 3.887e-16,
+        "max_rel_pot": 3.174e-16,
+        "pm_comm_ms": 826.625,
+        "intra_node_ghost_cells": 0,
+        "inter_node_ghost_cells": 712,
+        "status": "passed"
       }
     ],
-    "pending_configs": ["1N x 4R", "2N x 1G", "2N x 2G"]
+    "pending_configs": ["1N x 4R", "2N x 2G"]
   },
   "milestone_2c_build": {
     "status": "passed",

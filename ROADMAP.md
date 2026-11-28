@@ -52,7 +52,7 @@
 
 | 阶段 | 排期 | 目标硬件 | 核心改造内容与对应模块 | 定量验收门禁（Gate） |
 | --- | --- | --- | --- | --- |
-| **P1：高阶 PM 网格与去混叠** | 第 2 周 | `1–2× RTX 4090` | 在 [src/grav_cuda_pm.cu](src/grav_cuda_pm.cu) 与 [src/grav_cuda_pm_mpi.cu](src/grav_cuda_pm_mpi.cu) 中将 2 阶 CIC 升级为 3 阶 **TSC** / 4 阶 **PCS**，加入半网格 **Interlacing（交错网格平均去混叠）**、可选精确 $i\mathbf{k}$ 谱梯度与匹配去卷积核，并系统标定平滑半径 $r_s/\Delta x$。 | **Gate P1**：`Ewald` 全力（PM + Tree）中位误差（$\theta=0.3$）由 `1.03e-3` 压降至 **`< 1e-4`**；单步 PM 额外耗时 `< 10%`。 |
+| **P1：高阶 PM 网格与去混叠** | 第 2 周（**已完成 Gate P1**） | `1× RTX 4090` | 已在 [src/grav_cuda_pm.cu](src/grav_cuda_pm.cu)、[src/grav_cuda_pm_dist.cu](src/grav_cuda_pm_dist.cu) 与 [src/grav_cuda_pm_mpi.cu](src/grav_cuda_pm_mpi.cu) 实现 `CIC/TSC/PCS`（`GRAV_PM_ORDER=2|3|4`）、半网格对称 `Interlacing`（`GRAV_PM_INTERLACE=1`）、精确 $-i\mathbf{k}$ 谱梯度（`GRAV_PM_GRAD=ik`）及 `GRAV_PM_ASMTH`；同步完成 `monofonIC`/`MUSIC` 统一 IC 适配层。 | **Gate P1 已通过**（[reports/p1-pm-precision-gate.json](reports/p1-pm-precision-gate.json)）：12 组单测零自力 $\le 1.43\times 10^{-14}$、牛顿第三定律 `0.0`；`Ewald` 全力中位误差（$\theta=0.3$）由 `1.034e-3` 压降至 **`5.58e-5`**（`PCS+Interlace+ik`，**18.5× 提升**）与 **`6.68e-5`**（`TSC+Interlace+ik`，**15.5× 提升**）。 |
 | **P2：高阶多极展开 + 高精度模式** | 第 5–6 周 | `1–2× RTX 4090` | 在 [src/grouped_force.cuh](src/grouped_force.cuh) 与 `src/m2p/` 引入高阶（5 阶多极 / FMM `L2P`）核函数，并新增 `GRAV_PRECISION_MODE=high` 编译/运行模式（FP64 力/多极累加与可选高阶树）。 | **Gate P2**：`Ewald` 全力中位误差达到 **`~1–3e-5`**（看齐 `Abacus` / 高阶 `PKDGRAV3` 梯队）；`Zel'dovich` 位移 RMS `< 0.1%`；$256^3$ `Layzer–Irvine` 残差 **`< 1e-4`**。 |
 | **P3：自适应时间步与辛守恒精细化** | 第 7 周 | `1× RTX 4090` | 在时间步进器中增加潮汐张量 / 动力学时间步判据，优化多层级跨 rung 对称同步规则，降低高密度晕心积分相位漂移。 | **Gate P3**：孤立 Plummer 球能量漂移 **`< 1e-6`**；大暗晕内区密度剖面（$r < 3\epsilon$）与超细固定步长参考解偏差 **`< 1%`**。 |
 
