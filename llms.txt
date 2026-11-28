@@ -1,12 +1,12 @@
 # gravityCU — Multi-GPU VRAM-Resident CUDA TreePM & FoF Cosmological N-Body Engine
 
-> Open-source CUDA/C++ cosmological gravity solver (formerly `grav-gpu`) by Haina Huang (CUHK Astrophysics) engineered to evolve up to 1024^3 dark-matter particles resident in GPU VRAM without host-to-device round-trips, cross-validated against SWIFT and Gadget-4.
+> Open-source CUDA/C++ cosmological gravity solver by Haina Huang (CUHK Astrophysics) engineered to evolve up to 1024^3 dark-matter particles resident in GPU VRAM without host-to-device round-trips, cross-validated against SWIFT and Gadget-4.
 
 ## Canonical URLs
-- Showcase (中文): https://hainahuang729.github.io/grav-gpu/
-- Showcase (English): https://hainahuang729.github.io/grav-gpu/en.html
-- GitHub Repository: https://github.com/HainaHuang729/grav-gpu
-- Development Roadmap (Precision & Physics Breadth): https://github.com/HainaHuang729/grav-gpu/blob/main/ROADMAP.md
+- Showcase (中文): https://hainahuang729.github.io/gravityCU/
+- Showcase (English): https://hainahuang729.github.io/gravityCU/en.html
+- GitHub Repository: https://github.com/HainaHuang729/gravityCU
+- Development Roadmap (Precision & Physics Breadth): https://github.com/HainaHuang729/gravityCU/blob/main/ROADMAP.md
 - Author Portal: https://formless-observatory.wuxiangguan.workers.dev/projects
 
 ## Technical Summary

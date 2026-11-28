@@ -16,4 +16,4 @@ Allow: /
 User-agent: Google-Extended
 Allow: /
 
-Sitemap: https://hainahuang729.github.io/grav-gpu/sitemap.xml
+Sitemap: https://hainahuang729.github.io/gravityCU/sitemap.xml

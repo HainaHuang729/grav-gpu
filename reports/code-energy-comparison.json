@@ -20,14 +20,14 @@
       "swift_gadget_grav_eta": 0.025,
       "pkdgrav3_bEpsAccStep": true,
       "pkdgrav3_dEta_matched": 0.2236068,
-      "pkdgrav3_note": "PKDGRAV3 uses dt = dEta * sqrt(eps / |a|), whereas SWIFT, GADGET-4, and grav-gpu use dt = sqrt(2 * eta_G * eps / |a|); sqrt(2 * 0.025) = 0.2236068."
+      "pkdgrav3_note": "PKDGRAV3 uses dt = dEta * sqrt(eps / |a|), whereas SWIFT, GADGET-4, and gravityCU use dt = sqrt(2 * eta_G * eps / |a|); sqrt(2 * 0.025) = 0.2236068."
     }
   },
   "power_methodology": {
     "host_cluster": "phy-gpus node a9 (2x AMD EPYC 9754 256 physical cores, 720 W combined CPU TDP, ~80 W DRAM/chassis; 5x NVIDIA RTX A6000 48 GB GPUs)",
     "gpu_telemetry": "Hardware-measured 200 ms nvidia-smi polling (--query-gpu=timestamp,index,power.draw,utilization.gpu,memory.used), trapezoidal time integration over the full timed process.",
     "node_energy_models": {
-      "gpu_runs": "Measured NVML GPU energy + modeled 120 W base host/CPU overhead * wall_s (actual CPU host utilization is ~14-79% of 1 core during grav-gpu runs).",
+      "gpu_runs": "Measured NVML GPU energy + modeled 120 W base host/CPU overhead * wall_s (actual CPU host utilization is ~14-79% of 1 core during gravityCU runs).",
       "cpu_utilization_scaled": "120 W idle/chassis + 680 W * min(1.0, cpu_util_pct / 25600.0) across the 256 physical cores.",
       "cpu_flat_700w_reference": "Flat 700 W dual-socket reference node power * wall_s (consistent with reports/full-history-1024-model.json)."
     },
@@ -230,7 +230,7 @@
     },
     {
       "id": "grav_gpu_1g_1d_lazy",
-      "code": "grav-gpu",
+      "code": "gravityCU",
       "config": "1x RTX A6000 (1D Slab, Lazy)",
       "hardware": "1x RTX A6000",
       "algorithm": "GPU-resident TreePM + Warp-M2L + 1D Slab + Lazy Octree (312 steps)",
@@ -268,7 +268,7 @@
     },
     {
       "id": "grav_gpu_1g_3d_lazy",
-      "code": "grav-gpu",
+      "code": "gravityCU",
       "config": "1x RTX A6000 (3D Hilbert, Lazy)",
       "hardware": "1x RTX A6000",
       "algorithm": "GPU-resident TreePM + Warp-M2L + 3D Hilbert + Lazy Octree (312 steps)",
@@ -306,7 +306,7 @@
     },
     {
       "id": "grav_gpu_2g_3d_eager",
-      "code": "grav-gpu",
+      "code": "gravityCU",
       "config": "2x RTX A6000 (3D Hilbert, Eager)",
       "hardware": "2x RTX A6000",
       "algorithm": "GPU-resident TreePM + Dist-PM + 3D Hilbert (320 steps, full rebuild)",
@@ -344,7 +344,7 @@
     },
     {
       "id": "grav_gpu_2g_3d_lazy",
-      "code": "grav-gpu",
+      "code": "gravityCU",
       "config": "2x RTX A6000 (3D Hilbert, Lazy)",
       "hardware": "2x RTX A6000",
       "algorithm": "GPU-resident TreePM + Dist-PM + 3D Hilbert + Lazy Octree (312 steps)",
@@ -382,7 +382,7 @@
     },
     {
       "id": "grav_gpu_4g_3d_eager",
-      "code": "grav-gpu",
+      "code": "gravityCU",
       "config": "4x RTX A6000 (3D Hilbert, Eager)",
       "hardware": "4x RTX A6000",
       "algorithm": "GPU-resident TreePM + Dist-PM + 3D Hilbert (320 steps, full rebuild)",
@@ -420,7 +420,7 @@
     },
     {
       "id": "grav_gpu_4g_3d_lazy",
-      "code": "grav-gpu",
+      "code": "gravityCU",
       "config": "4x RTX A6000 (3D Hilbert, Lazy)",
       "hardware": "4x RTX A6000",
       "algorithm": "GPU-resident TreePM + Dist-PM + 3D Hilbert + Lazy Octree (312 steps)",
@@ -479,6 +479,6 @@
     }
   },
   "architectural_notes": {
-    "why_pkdgrav3_differs_at_256": "PKDGRAV3 (3.5.1, CUDA sm_86 FMM+Ewald) offloads P2P/M2L gravity tiles to GPUs while rebuilding the ORB/tree topology on host CPUs and performing full Domain Decomposition on steps where active rung <= 4 (67 DDs and 245 tree builds over 244 adaptive substeps). At 256^3 (16.78M particles), host DD (426s on 1G, 279s on 2G-MPI) + tree builds (522s on 1G, 146s on 2G-MPI) + host-device transfer overhead limit average GPU utilization to ~3-6% (~68W per A6000) and dominate wall time. By contrast, grav-gpu holds all 16.78M particles GPU-resident end-to-end and skips full octree rebuilds on 279/312 active substeps via GPU lazy Hilbert refit (43-74% GPU utilization), delivering 29x faster wall time and 18-26x lower whole-node energy."
+    "why_pkdgrav3_differs_at_256": "PKDGRAV3 (3.5.1, CUDA sm_86 FMM+Ewald) offloads P2P/M2L gravity tiles to GPUs while rebuilding the ORB/tree topology on host CPUs and performing full Domain Decomposition on steps where active rung <= 4 (67 DDs and 245 tree builds over 244 adaptive substeps). At 256^3 (16.78M particles), host DD (426s on 1G, 279s on 2G-MPI) + tree builds (522s on 1G, 146s on 2G-MPI) + host-device transfer overhead limit average GPU utilization to ~3-6% (~68W per A6000) and dominate wall time. By contrast, gravityCU holds all 16.78M particles GPU-resident end-to-end and skips full octree rebuilds on 279/312 active substeps via GPU lazy Hilbert refit (43-74% GPU utilization), delivering 29x faster wall time and 18-26x lower whole-node energy."
   }
 }

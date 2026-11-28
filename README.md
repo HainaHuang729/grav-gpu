@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Roadmap](https://img.shields.io/badge/Roadmap-Precision_%26_Physics_Breadth-008763.svg)](ROADMAP.md)
 
-`gravityCU` (formerly `grav-gpu`) is a multi-GPU CUDA TreePM cosmological gravity, lightcone, and Full-GPU Friends-of-Friends (FoF / Catalog / Spherical Overdensity) solver designed to evolve from $64^3$ smoke tests up to **$1024^3$ (`1,073,741,824`)** particles **100% resident inside GPU VRAM** (`4× NVIDIA RTX A6000`, `4 × 48 GiB`) without host-device swapping.
+`gravityCU` is a multi-GPU CUDA TreePM cosmological gravity, lightcone, and Full-GPU Friends-of-Friends (FoF / Catalog / Spherical Overdensity) solver designed to evolve from $64^3$ smoke tests up to **$1024^3$ (`1,073,741,824`)** particles **100% resident inside GPU VRAM** (`4× NVIDIA RTX A6000`, `4 × 48 GiB`) without host-device swapping.
 
 ---
 
@@ -159,7 +159,7 @@ All templates read `KERNEL_BUILD_DIR`, `DATA_DIR`, `CUDA_HOME`, `CXX_BIN`, and `
 ## Repository Structure
 
 ```text
-gravityCU/                         # repo folder: grav-gpu
+gravityCU/
 ├── Makefile                       # Turnkey build & smoke targets (fof, pm, pm-mpi, engine, mpi-engine, smoke)
 ├── ROADMAP.md                     # Precision (P1-P3), Physics Breadth (B1-B4) & Deferred Exascale schedule
 ├── src/

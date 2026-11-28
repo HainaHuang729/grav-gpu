@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="gravityCU（原 grav-gpu）是基于 CUDA/C++ 的单卡及多卡常驻显存宇宙学 TreePM 与 FoF 暗晕寻找引擎，支持 1024³ 粒子规模，与 SWIFT 及 Gadget-4 完成能量守恒与功率谱交叉验证。" />
+  <meta name="description" content="gravityCU 是基于 CUDA/C++ 的单卡及多卡常驻显存宇宙学 TreePM 与 FoF 暗晕寻找引擎，支持 1024³ 粒子规模，与 SWIFT 及 Gadget-4 完成能量守恒与功率谱交叉验证。" />
   <meta name="author" content="Haina Huang" />
   <meta name="robots" content="index,follow" />
-  <link rel="canonical" href="https://hainahuang729.github.io/grav-gpu/" />
-  <link rel="alternate" hreflang="zh-CN" href="https://hainahuang729.github.io/grav-gpu/" />
-  <link rel="alternate" hreflang="en" href="https://hainahuang729.github.io/grav-gpu/en.html" />
-  <link rel="alternate" hreflang="x-default" href="https://hainahuang729.github.io/grav-gpu/en.html" />
+  <link rel="canonical" href="https://hainahuang729.github.io/gravityCU/" />
+  <link rel="alternate" hreflang="zh-CN" href="https://hainahuang729.github.io/gravityCU/" />
+  <link rel="alternate" hreflang="en" href="https://hainahuang729.github.io/gravityCU/en.html" />
+  <link rel="alternate" hreflang="x-default" href="https://hainahuang729.github.io/gravityCU/en.html" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="gravityCU — 多卡常驻显存 CUDA TreePM &amp; FoF 引擎" />
   <meta property="og:description" content="CUDA/C++ 宇宙学 N 体引力求解器，支持 1024³ 粒子显存常驻演化与 SWIFT/Gadget-4 跨代码交叉校验。" />
-  <meta property="og:url" content="https://hainahuang729.github.io/grav-gpu/" />
+  <meta property="og:url" content="https://hainahuang729.github.io/gravityCU/" />
   <meta name="twitter:card" content="summary" />
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"gravityCU","alternateName":"grav-gpu","description":"Multi-GPU VRAM-resident CUDA TreePM and Friends-of-Friends cosmological N-body gravity solver validated up to 1024^3 particles against SWIFT and Gadget-4.","url":"https://hainahuang729.github.io/grav-gpu/","codeRepository":"https://github.com/HainaHuang729/grav-gpu","programmingLanguage":["CUDA","C++"],"author":{"@type":"Person","name":"Haina Huang","url":"https://formless-observatory.wuxiangguan.workers.dev/"}}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"gravityCU","alternateName":"grav-gpu","description":"Multi-GPU VRAM-resident CUDA TreePM and Friends-of-Friends cosmological N-body gravity solver validated up to 1024^3 particles against SWIFT and Gadget-4.","url":"https://hainahuang729.github.io/gravityCU/","codeRepository":"https://github.com/HainaHuang729/gravityCU","programmingLanguage":["CUDA","C++"],"author":{"@type":"Person","name":"Haina Huang","url":"https://formless-observatory.wuxiangguan.workers.dev/"}}</script>
   <title>gravityCU — 多卡常驻显存 CUDA TreePM &amp; FoF 引擎</title>
   <style>
     :root {
@@ -371,13 +371,13 @@
       <div>
         <h1>gravityCU</h1>
         <p class="subtitle">
-          100% 显存常驻的多卡 CUDA TreePM 与全 GPU FoF 宇宙学引力求解器（原名 <code>grav-gpu</code>），面向 4 × RTX A6000（NVLink）与 1024³ 十亿粒子级演化，正推进高精度与多物理广度扩展。
+          100% 显存常驻的多卡 CUDA TreePM 与全 GPU FoF 宇宙学引力求解器，面向 4 × RTX A6000（NVLink）与 1024³ 十亿粒子级演化，正推进高精度与多物理广度扩展。
         </p>
       </div>
       <div class="header-actions">
         <a class="lang-link" href="en.html">EN</a>
-        <a class="lang-link" href="https://github.com/HainaHuang729/grav-gpu/blob/main/ROADMAP.md" target="_blank" rel="noopener">路线图</a>
-        <a class="repo-link" href="https://github.com/HainaHuang729/grav-gpu" target="_blank" rel="noopener">GitHub 仓库</a>
+        <a class="lang-link" href="https://github.com/HainaHuang729/gravityCU/blob/main/ROADMAP.md" target="_blank" rel="noopener">路线图</a>
+        <a class="repo-link" href="https://github.com/HainaHuang729/gravityCU" target="_blank" rel="noopener">GitHub 仓库</a>
       </div>
     </header>
 
@@ -667,7 +667,7 @@ python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_c
     </section>
 
     <footer>
-      <span>gravityCU · 4 × NVIDIA RTX A6000 (NVLink4) vs. 256-Core CPU SWIFT · <a href="https://github.com/HainaHuang729/grav-gpu/blob/main/ROADMAP.md" target="_blank" rel="noopener">精度与物理扩展路线图</a></span>
+      <span>gravityCU · 4 × NVIDIA RTX A6000 (NVLink4) vs. 256-Core CPU SWIFT · <a href="https://github.com/HainaHuang729/gravityCU/blob/main/ROADMAP.md" target="_blank" rel="noopener">精度与物理扩展路线图</a></span>
       <span>MIT License · Haina Huang (CUHK)</span>
     </footer>
   </div>

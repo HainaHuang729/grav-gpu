@@ -1,6 +1,6 @@
 # `gravityCU` 技术路线与开发排期文档
 
-> **项目更名说明**：原 **`grav-gpu`** 现正式更名为 **`gravityCU`**（CU = CUDA + Cosmology + CUHK）。为保持现有 GitHub 仓库、Pages 演示页与论文引用的外部链接连续可用，远端仓库路径 `HainaHuang729/grav-gpu` 暂保持不变，所有核心工程文档、网页、论文手稿与基准图表已统一更新为 `gravityCU`。
+> **项目更名完成**：本项目已由 **`grav-gpu`** 全面更名为 **`gravityCU`**（CU = CUDA + Cosmology + CUHK），GitHub 仓库（[`HainaHuang729/gravityCU`](https://github.com/HainaHuang729/gravityCU)）、Pages 展示页（[`hainahuang729.github.io/gravityCU/`](https://hainahuang729.github.io/gravityCU/)）、论文手稿、基准图表与本地工作目录已全部统一。
 
 ---
 
