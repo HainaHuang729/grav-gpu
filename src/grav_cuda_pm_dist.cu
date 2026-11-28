@@ -1,5 +1,6 @@
 #include "config.h"
 #include "grav_cuda_pm_dist.h"
+#include "grav_pm_config.cuh"
 
 // Read the split choice from SWIFT's source header in both standalone and
 // integrated builds, even when that header is not in the include chain yet.
@@ -71,27 +72,8 @@ __device__ __forceinline__ int wrap_idx(int x, int n) {
   return r < 0 ? r + n : r;
 }
 
-struct DistCIC {
-  int cell[3];
-  double weight[3][2];
-
-  __device__ DistCIC(double x0, double x1, double x2, int n, double box) {
-    const double coords[3] = {x0, x1, x2};
-    const double fac = n / box;
-    for (int axis = 0; axis < 3; ++axis) {
-      const double unwrapped = coords[axis];
-      double x = unwrapped;
-      // SWIFT positions can be just outside a periodic box at a rebuild.
-      if (x < 0.0 || x >= box) x = unwrapped - floor(unwrapped / box) * box;
-      const double coordinate = fac * x;
-      cell[axis] = min(int(coordinate), n - 1);
-      weight[axis][1] = coordinate - cell[axis];
-      weight[axis][0] = 1.0 - weight[axis][1];
-    }
-  }
-};
-
-__global__ void dist_deposit_kernel(
+template <int Order>
+__global__ void dist_deposit_kernel_t(
     const double3* __restrict__ x,
     const float* __restrict__ mass_or_null,
     float uniform_mass,
@@ -101,38 +83,40 @@ __global__ void dist_deposit_kernel(
     int local_nx,
     int* __restrict__ oob_flag,
     int n,
-    double box) {
+    double box,
+    double shift) {
   const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
   if (i >= count) return;
   const double mp = double(mass_or_null ? mass_or_null[i] : uniform_mass);
   if (mp == 0.0) return;
   const double3 pos = x[i];
-  const DistCIC cic(pos.x, pos.y, pos.z, n, box);
-  const int y0 = cic.cell[1];
-  const int y1 = (y0 + 1 < n) ? (y0 + 1) : 0;
-  const int z0 = cic.cell[2];
-  const int z1 = (z0 + 1 < n) ? (z0 + 1) : 0;
-  for (int ix = 0; ix < 2; ++ix) {
-    int gx = cic.cell[0] + ix;
-    if (gx >= n) gx -= n;
+  const PmStencil<Order> st(pos.x, pos.y, pos.z, n, box, shift);
+  #pragma unroll
+  for (int ix = 0; ix < Order; ++ix) {
+    const int gx = wrap_idx(st.base[0] + ix, n);
     const int lx = global_to_local_x[gx];
     if (lx < 0 || lx >= local_nx) {
       atomicExch(oob_flag, gx + 1);
       continue;
     }
-    const double mx = mp * cic.weight[0][ix];
+    const double mx = mp * st.weight[0][ix];
     const size_t x_off = size_t(lx) * n * n;
-    for (int iy = 0; iy < 2; ++iy) {
-      const int gy = iy ? y1 : y0;
-      const double mxy = mx * cic.weight[1][iy];
+    #pragma unroll
+    for (int iy = 0; iy < Order; ++iy) {
+      const int gy = wrap_idx(st.base[1] + iy, n);
+      const double mxy = mx * st.weight[1][iy];
       const size_t xy_off = x_off + size_t(gy) * n;
-      atomicAdd(&local_dens[xy_off + size_t(z0)], mxy * cic.weight[2][0]);
-      atomicAdd(&local_dens[xy_off + size_t(z1)], mxy * cic.weight[2][1]);
+      #pragma unroll
+      for (int iz = 0; iz < Order; ++iz) {
+        const int gz = wrap_idx(st.base[2] + iz, n);
+        atomicAdd(&local_dens[xy_off + size_t(gz)], mxy * st.weight[2][iz]);
+      }
     }
   }
 }
 
-__global__ void dist_interpolate_kernel(
+template <int Order>
+__global__ void dist_interpolate_kernel_t(
     const double3* __restrict__ x,
     size_t count,
     const double4* __restrict__ local_field,
@@ -143,49 +127,54 @@ __global__ void dist_interpolate_kernel(
     double box,
     float grav_G,
     float3* __restrict__ acc_out,
-    float* __restrict__ pot_out_or_null) {
+    float* __restrict__ pot_out_or_null,
+    double shift,
+    float acc_scale,
+    int accumulate) {
   const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
   if (i >= count) return;
   const double3 pos = x[i];
-  const DistCIC cic(pos.x, pos.y, pos.z, n, box);
-  const int y0 = cic.cell[1];
-  const int y1 = (y0 + 1 < n) ? (y0 + 1) : 0;
-  const int z0 = cic.cell[2];
-  const int z1 = (z0 + 1 < n) ? (z0 + 1) : 0;
+  const PmStencil<Order> st(pos.x, pos.y, pos.z, n, box, shift);
   double4 answer{};
-  for (int ix = 0; ix < 2; ++ix) {
-    int gx = cic.cell[0] + ix;
-    if (gx >= n) gx -= n;
+  #pragma unroll
+  for (int ix = 0; ix < Order; ++ix) {
+    const int gx = wrap_idx(st.base[0] + ix, n);
     const int lx = global_to_local_x[gx];
     if (lx < 0 || lx >= local_nx) {
       atomicExch(oob_flag, gx + 1);
       continue;
     }
     const size_t x_off = size_t(lx) * n * n;
-    for (int iy = 0; iy < 2; ++iy) {
-      const int gy = iy ? y1 : y0;
-      const double wxy = cic.weight[0][ix] * cic.weight[1][iy];
+    #pragma unroll
+    for (int iy = 0; iy < Order; ++iy) {
+      const int gy = wrap_idx(st.base[1] + iy, n);
+      const double wxy = st.weight[0][ix] * st.weight[1][iy];
       const size_t xy_off = x_off + size_t(gy) * n;
-      {
-        const double4 c0 = local_field[xy_off + size_t(z0)];
-        const double w0 = wxy * cic.weight[2][0];
-        answer.x += w0 * c0.x;
-        answer.y += w0 * c0.y;
-        answer.z += w0 * c0.z;
-        answer.w += w0 * c0.w;
-      }
-      {
-        const double4 c1 = local_field[xy_off + size_t(z1)];
-        const double w1 = wxy * cic.weight[2][1];
-        answer.x += w1 * c1.x;
-        answer.y += w1 * c1.y;
-        answer.z += w1 * c1.z;
-        answer.w += w1 * c1.w;
+      #pragma unroll
+      for (int iz = 0; iz < Order; ++iz) {
+        const int gz = wrap_idx(st.base[2] + iz, n);
+        const double4 c = local_field[xy_off + size_t(gz)];
+        const double w = wxy * st.weight[2][iz];
+        answer.x += w * c.x;
+        answer.y += w * c.y;
+        answer.z += w * c.z;
+        answer.w += w * c.w;
       }
     }
   }
-  acc_out[i] = {grav_G * float(answer.x), grav_G * float(answer.y), grav_G * float(answer.z)};
-  if (pot_out_or_null) pot_out_or_null[i] = grav_G * float(answer.w);
+  const float s = grav_G * acc_scale;
+  const float ax = s * float(answer.x);
+  const float ay = s * float(answer.y);
+  const float az = s * float(answer.z);
+  if (accumulate) {
+    acc_out[i].x += ax;
+    acc_out[i].y += ay;
+    acc_out[i].z += az;
+    if (pot_out_or_null) pot_out_or_null[i] += s * float(answer.w);
+  } else {
+    acc_out[i] = {ax, ay, az};
+    if (pot_out_or_null) pot_out_or_null[i] = s * float(answer.w);
+  }
 }
 
 __global__ void add_doubles_kernel(double* __restrict__ dst,
@@ -305,7 +294,8 @@ __global__ void dist_filter_kernel(
     int n,
     int nz_c,
     double box,
-    double split) {
+    double split,
+    int order) {
   const size_t total = size_t(ny_g) * nz_c * n;
   const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
   if (i >= total) return;
@@ -330,10 +320,54 @@ __global__ void dist_filter_kernel(
   const double window = arg / (sinh(arg) + FLT_MIN);
 #endif
   const double cic = dist_inverse_sinc(kx, n) * dist_inverse_sinc(ky, n) * dist_inverse_sinc(kz, n);
-  const double square = cic * cic;
-  const double weight = (-1.0 / (dist_pm_pi * box)) * window / (k2 + FLT_MIN) * square * square;
+  const double deconv = grav_pm_deconv_weight(cic, order);
+  const double weight = (-1.0 / (dist_pm_pi * box)) * window / (k2 + FLT_MIN) * deconv;
   modes[i].x *= weight;
   modes[i].y *= weight;
+}
+
+__global__ void dist_spectral_grad_y_kernel(
+    const cufftDoubleComplex* __restrict__ phi_y,
+    cufftDoubleComplex* __restrict__ out_y,
+    int y0_g,
+    int ny_g,
+    int n,
+    int nz_c,
+    double two_pi_over_box,
+    int axis) {
+  const size_t total = size_t(ny_g) * nz_c * n;
+  const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const int half = n / 2;
+  int kx = int(i % n);
+  const size_t tmp = i / n;
+  const int kz = int(tmp % nz_c);
+  const int ly = int(tmp / nz_c);
+  int ky = y0_g + ly;
+  if (kx > half) kx -= n;
+  if (ky > half) ky -= n;
+  int k_int = (axis == 0) ? kx : ((axis == 1) ? ky : kz);
+  if (k_int == half || k_int == -half || k_int == 0) {
+    out_y[i] = {0.0, 0.0};
+    return;
+  }
+  const double k_phys = two_pi_over_box * double(k_int);
+  const cufftDoubleComplex z = phi_y[i];
+  out_y[i] = {k_phys * z.y, -k_phys * z.x};
+}
+
+__global__ void dist_pack_slab_comp_kernel(
+    const double* __restrict__ src,
+    double4* __restrict__ dst,
+    size_t total,
+    int axis) {
+  const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const double v = src[i];
+  if (axis == 0) dst[i].x = v;
+  else if (axis == 1) dst[i].y = v;
+  else if (axis == 2) dst[i].z = v;
+  else dst[i].w = v;
 }
 
 __device__ __forceinline__ double dist_stencil(double lo2, double lo1, double hi1, double hi2) {
@@ -410,7 +444,7 @@ struct GravDistPm::Impl {
 
   std::vector<int> nx, ny;
   std::vector<cufftHandle> plan_2d_d2z, plan_2d_z2d, plan_1d_z2z;
-  std::vector<cufftDoubleComplex*> buf0, buf1;
+  std::vector<cufftDoubleComplex*> buf0, buf1, buf_phi;
   std::vector<double*> d_slab_real_padded;
   std::vector<double4*> d_slab_field;
 
@@ -426,6 +460,8 @@ struct GravDistPm::Impl {
   std::vector<size_t> local_field_cap_planes;
   std::vector<double*> d_local_dens;
   std::vector<double4*> d_local_field;
+  std::vector<double4*> d_local_field_shift;
+  bool has_shift_field = false;
   std::vector<int*> d_global_to_local_x;
   std::vector<int*> d_oob;
   std::vector<size_t> fixed_bytes;
@@ -494,13 +530,20 @@ struct GravDistPm::Impl {
           CHECK_CUDA(cudaFree(d_local_field[g]));
           d_local_field[g] = nullptr;
         }
+        if (d_local_field_shift[g]) {
+          CHECK_CUDA(cudaFree(d_local_field_shift[g]));
+          d_local_field_shift[g] = nullptr;
+        }
         local_field_cap_planes[g] = lnx;
         if (lnx > 0) {
           CHECK_CUDA(cudaMalloc(&d_local_field[g], lnx * plane * sizeof(double4)));
+          if (has_shift_field) {
+            CHECK_CUDA(cudaMalloc(&d_local_field_shift[g], lnx * plane * sizeof(double4)));
+          }
         }
       }
       local_bytes[g] = local_dens_cap_planes[g] * plane * sizeof(double) +
-                       local_field_cap_planes[g] * plane * sizeof(double4);
+                       local_field_cap_planes[g] * plane * sizeof(double4) * (has_shift_field ? 2 : 1);
       CHECK_CUDA(cudaStreamSynchronize(streams[g]));
     }
     build_runs();
@@ -646,6 +689,7 @@ void GravDistPm::init(const std::vector<int>& devs,
   im.plan_1d_z2z.assign(G, 0);
   im.buf0.assign(G, nullptr);
   im.buf1.assign(G, nullptr);
+  im.buf_phi.assign(G, nullptr);
   im.d_slab_real_padded.assign(G, nullptr);
   im.d_slab_field.assign(G, nullptr);
   im.ev_prod.assign(G, nullptr);
@@ -663,6 +707,8 @@ void GravDistPm::init(const std::vector<int>& devs,
   im.local_field_cap_planes.assign(G, 0);
   im.d_local_dens.assign(G, nullptr);
   im.d_local_field.assign(G, nullptr);
+  im.d_local_field_shift.assign(G, nullptr);
+  im.has_shift_field = false;
   im.d_global_to_local_x.assign(G, nullptr);
   im.d_oob.assign(G, nullptr);
   im.fixed_bytes.assign(G, 0);
@@ -762,22 +808,43 @@ void GravDistPm::begin_deposit(int g) {
   }
 }
 
-void GravDistPm::deposit(int g, const void* d_x_double3, const float* d_mass_or_null,
-                          float uniform_mass, size_t count, double box) {
+void GravDistPm::deposit_shift(int g, const void* d_x_double3, const float* d_mass_or_null,
+                               float uniform_mass, size_t count, double box, double shift) {
   if (!count) return;
   auto& im = *impl_;
+  const auto cfg = grav_pm_get_config();
   const int lnx = int(im.local_planes[g].size());
-  dist_deposit_kernel<<<blocks_for(count), dist_pm_block, 0, im.streams[g]>>>(
-      static_cast<const double3*>(d_x_double3),
-      d_mass_or_null, uniform_mass, count,
-      im.d_local_dens[g], im.d_global_to_local_x[g], lnx, im.d_oob[g],
-      im.side, box);
+  if (cfg.order == 3) {
+    dist_deposit_kernel_t<3><<<blocks_for(count), dist_pm_block, 0, im.streams[g]>>>(
+        static_cast<const double3*>(d_x_double3),
+        d_mass_or_null, uniform_mass, count,
+        im.d_local_dens[g], im.d_global_to_local_x[g], lnx, im.d_oob[g],
+        im.side, box, shift);
+  } else if (cfg.order == 4) {
+    dist_deposit_kernel_t<4><<<blocks_for(count), dist_pm_block, 0, im.streams[g]>>>(
+        static_cast<const double3*>(d_x_double3),
+        d_mass_or_null, uniform_mass, count,
+        im.d_local_dens[g], im.d_global_to_local_x[g], lnx, im.d_oob[g],
+        im.side, box, shift);
+  } else {
+    dist_deposit_kernel_t<2><<<blocks_for(count), dist_pm_block, 0, im.streams[g]>>>(
+        static_cast<const double3*>(d_x_double3),
+        d_mass_or_null, uniform_mass, count,
+        im.d_local_dens[g], im.d_global_to_local_x[g], lnx, im.d_oob[g],
+        im.side, box, shift);
+  }
   CHECK_CUDA(cudaGetLastError());
 }
 
-void GravDistPm::solve_and_gather(double box, double split) {
+void GravDistPm::deposit(int g, const void* d_x_double3, const float* d_mass_or_null,
+                          float uniform_mass, size_t count, double box) {
+  deposit_shift(g, d_x_double3, d_mass_or_null, uniform_mass, count, box, 0.0);
+}
+
+void GravDistPm::solve_and_gather(double box, double split, int slot) {
   auto& im = *impl_;
   if (!im.active) throw std::runtime_error("GravDistPm not initialized");
+  const auto cfg = grav_pm_get_config();
   int prev_dev = 0;
   CHECK_CUDA(cudaGetDevice(&prev_dev));
 
@@ -787,6 +854,27 @@ void GravDistPm::solve_and_gather(double box, double split) {
   const size_t P = size_t(n) * size_t(n);
 
   try {
+    if (slot == 1 && !im.has_shift_field) {
+      im.has_shift_field = true;
+      for (int g = 0; g < G; ++g) {
+        CHECK_CUDA(cudaSetDevice(im.devs[g]));
+        const size_t cap = im.local_field_cap_planes[g];
+        if (cap > 0) {
+          CHECK_CUDA(cudaMalloc(&im.d_local_field_shift[g], cap * P * sizeof(double4)));
+        }
+        im.local_bytes[g] = im.local_dens_cap_planes[g] * P * sizeof(double) +
+                            cap * P * sizeof(double4) * 2;
+      }
+    }
+    if (cfg.spectral_grad && !im.buf_phi[0]) {
+      for (int g = 0; g < G; ++g) {
+        CHECK_CUDA(cudaSetDevice(im.devs[g]));
+        const int m_max = std::max(im.nx[g], im.ny[g]);
+        const size_t cpx_bytes = size_t(m_max) * size_t(n) * size_t(nz_c) * sizeof(cufftDoubleComplex);
+        CHECK_CUDA(cudaMalloc(&im.buf_phi[g], cpx_bytes));
+        im.fixed_bytes[g] += cpx_bytes;
+      }
+    }
     // Step 2: Zero slab interior + local reduce-scatter contributions -> d_slab_real_padded + 2*P
     for (int g = 0; g < G; ++g) {
       CHECK_CUDA(cudaSetDevice(im.devs[g]));
@@ -882,92 +970,122 @@ void GravDistPm::solve_and_gather(double box, double split) {
       CHECK_CUDA(cudaGetLastError());
     }
 
-    // Step 5: 1D Z2Z Forward -> Filter -> 1D Z2Z Inverse
+    // Step 5: 1D Z2Z Forward -> Filter
     for (int g = 0; g < G; ++g) {
       CHECK_CUDA(cudaSetDevice(im.devs[g]));
       CHECK_CUFFT(cufftExecZ2Z(im.plan_1d_z2z[g], im.buf1[g], im.buf1[g], CUFFT_FORWARD));
       const size_t total = size_t(im.ny[g]) * nz_c * n;
       dist_filter_kernel<<<blocks_for(total), dist_pm_block, 0, im.streams[g]>>>(
-          im.buf1[g], im.splits.y0[g], im.ny[g], n, nz_c, box, split);
-      CHECK_CUDA(cudaGetLastError());
-      CHECK_CUFFT(cufftExecZ2Z(im.plan_1d_z2z[g], im.buf1[g], im.buf1[g], CUFFT_INVERSE));
-    }
-
-    // Step 6: Pack Y->X, can_peer A2A, Unpack Y->X
-    for (int g = 0; g < G; ++g) {
-      CHECK_CUDA(cudaSetDevice(im.devs[g]));
-      const size_t total = size_t(im.ny[g]) * nz_c * n;
-      pack_yx_kernel<<<blocks_for(total), dist_pm_block, 0, im.streams[g]>>>(
-          im.buf1[g], im.buf0[g], im.ny[g], n, nz_c, im.splits);
+          im.buf1[g], im.splits.y0[g], im.ny[g], n, nz_c, box, split, cfg.order);
       CHECK_CUDA(cudaGetLastError());
     }
 
-    {
-      std::vector<std::vector<int>> used(G, std::vector<int>(G, 0));
-      im.record_prod();
+    auto inverse_y_to_x_real = [&]() {
       for (int g = 0; g < G; ++g) {
-        for (int p = 0; p < G; ++p) {
-          const size_t bytes =
-              size_t(im.nx[p]) * size_t(im.ny[g]) * nz_c * sizeof(cufftDoubleComplex);
-          im.enqueue_xfer(
-              g, p,
-              im.buf0[g] + size_t(im.splits.x0[p]) * size_t(im.ny[g]) * nz_c,
-              im.buf1[p] + size_t(im.nx[p]) * size_t(im.splits.y0[g]) * nz_c,
-              bytes,
-              used);
+        CHECK_CUDA(cudaSetDevice(im.devs[g]));
+        CHECK_CUFFT(cufftExecZ2Z(im.plan_1d_z2z[g], im.buf1[g], im.buf1[g], CUFFT_INVERSE));
+        const size_t total = size_t(im.ny[g]) * nz_c * n;
+        pack_yx_kernel<<<blocks_for(total), dist_pm_block, 0, im.streams[g]>>>(
+            im.buf1[g], im.buf0[g], im.ny[g], n, nz_c, im.splits);
+        CHECK_CUDA(cudaGetLastError());
+      }
+      {
+        std::vector<std::vector<int>> used(G, std::vector<int>(G, 0));
+        im.record_prod();
+        for (int g = 0; g < G; ++g) {
+          for (int p = 0; p < G; ++p) {
+            const size_t bytes =
+                size_t(im.nx[p]) * size_t(im.ny[g]) * nz_c * sizeof(cufftDoubleComplex);
+            im.enqueue_xfer(
+                g, p,
+                im.buf0[g] + size_t(im.splits.x0[p]) * size_t(im.ny[g]) * nz_c,
+                im.buf1[p] + size_t(im.nx[p]) * size_t(im.splits.y0[g]) * nz_c,
+                bytes,
+                used);
+          }
+        }
+        im.wait_done(used);
+      }
+      for (int g = 0; g < G; ++g) {
+        CHECK_CUDA(cudaSetDevice(im.devs[g]));
+        const size_t total = size_t(im.nx[g]) * n * nz_c;
+        unpack_yx_kernel<<<blocks_for(total), dist_pm_block, 0, im.streams[g]>>>(
+            im.buf1[g], im.buf0[g], im.nx[g], n, nz_c, im.splits);
+        CHECK_CUDA(cudaGetLastError());
+        CHECK_CUFFT(cufftExecZ2D(im.plan_2d_z2d[g], im.buf0[g], im.d_slab_real_padded[g] + 2 * P));
+      }
+    };
+
+    if (cfg.spectral_grad) {
+      // Save filtered Phi(k) in buf_phi, then inverse-FFT Phi and -i*k_{x,y,z}*Phi
+      for (int g = 0; g < G; ++g) {
+        CHECK_CUDA(cudaSetDevice(im.devs[g]));
+        const size_t bytes = size_t(im.ny[g]) * nz_c * n * sizeof(cufftDoubleComplex);
+        CHECK_CUDA(cudaMemcpyAsync(im.buf_phi[g], im.buf1[g], bytes,
+                                   cudaMemcpyDeviceToDevice, im.streams[g]));
+      }
+      const double two_pi_over_box = 2.0 * dist_pm_pi / box;
+      const int axes[4] = {3, 0, 1, 2};
+      for (int pass = 0; pass < 4; ++pass) {
+        const int axis = axes[pass];
+        if (pass > 0) {
+          for (int g = 0; g < G; ++g) {
+            CHECK_CUDA(cudaSetDevice(im.devs[g]));
+            const size_t total = size_t(im.ny[g]) * nz_c * n;
+            dist_spectral_grad_y_kernel<<<blocks_for(total), dist_pm_block, 0, im.streams[g]>>>(
+                im.buf_phi[g], im.buf1[g], im.splits.y0[g], im.ny[g], n, nz_c,
+                two_pi_over_box, axis);
+            CHECK_CUDA(cudaGetLastError());
+          }
+        }
+        inverse_y_to_x_real();
+        for (int g = 0; g < G; ++g) {
+          CHECK_CUDA(cudaSetDevice(im.devs[g]));
+          const size_t total = size_t(im.nx[g]) * P;
+          dist_pack_slab_comp_kernel<<<blocks_for(total), dist_pm_block, 0, im.streams[g]>>>(
+              im.d_slab_real_padded[g] + 2 * P, im.d_slab_field[g], total, axis);
+          CHECK_CUDA(cudaGetLastError());
         }
       }
-      im.wait_done(used);
-    }
+    } else {
+      inverse_y_to_x_real();
 
-    for (int g = 0; g < G; ++g) {
-      CHECK_CUDA(cudaSetDevice(im.devs[g]));
-      const size_t total = size_t(im.nx[g]) * n * nz_c;
-      unpack_yx_kernel<<<blocks_for(total), dist_pm_block, 0, im.streams[g]>>>(
-          im.buf1[g], im.buf0[g], im.nx[g], n, nz_c, im.splits);
-      CHECK_CUDA(cudaGetLastError());
-    }
-
-    // Step 7: 2D Z2D cuFFT -> real potential in d_slab_real_padded + 2*P
-    for (int g = 0; g < G; ++g) {
-      CHECK_CUDA(cudaSetDevice(im.devs[g]));
-      CHECK_CUFFT(cufftExecZ2D(im.plan_2d_z2d[g], im.buf0[g], im.d_slab_real_padded[g] + 2 * P));
-    }
-
-    // Step 8: 2-plane periodic halo exchange
-    {
-      std::vector<std::vector<int>> used(G, std::vector<int>(G, 0));
-      im.record_prod();
-      for (int g = 0; g < G; ++g) {
-        const int left_g = (g - 1 + G) % G;
-        const int right_g = (g + 1) % G;
-        im.enqueue_xfer(
-            g, left_g,
-            im.d_slab_real_padded[g] + 2 * P,
-            im.d_slab_real_padded[left_g] + size_t(im.nx[left_g] + 2) * P,
-            2 * P * sizeof(double),
-            used);
-        im.enqueue_xfer(
-            g, right_g,
-            im.d_slab_real_padded[g] + size_t(im.nx[g]) * P,
-            im.d_slab_real_padded[right_g],
-            2 * P * sizeof(double),
-            used);
+      // Step 8: 2-plane periodic halo exchange
+      {
+        std::vector<std::vector<int>> used(G, std::vector<int>(G, 0));
+        im.record_prod();
+        for (int g = 0; g < G; ++g) {
+          const int left_g = (g - 1 + G) % G;
+          const int right_g = (g + 1) % G;
+          im.enqueue_xfer(
+              g, left_g,
+              im.d_slab_real_padded[g] + 2 * P,
+              im.d_slab_real_padded[left_g] + size_t(im.nx[left_g] + 2) * P,
+              2 * P * sizeof(double),
+              used);
+          im.enqueue_xfer(
+              g, right_g,
+              im.d_slab_real_padded[g] + size_t(im.nx[g]) * P,
+              im.d_slab_real_padded[right_g],
+              2 * P * sizeof(double),
+              used);
+        }
+        im.wait_done(used);
       }
-      im.wait_done(used);
+
+      // Step 9: 4th-order differentiation
+      const double fac = double(n) / box;
+      for (int g = 0; g < G; ++g) {
+        CHECK_CUDA(cudaSetDevice(im.devs[g]));
+        const size_t total = size_t(im.nx[g]) * P;
+        dist_differentiate_slab_kernel<<<blocks_for(total), dist_pm_block, 0, im.streams[g]>>>(
+            im.d_slab_real_padded[g], im.d_slab_field[g], im.nx[g], n, fac);
+        CHECK_CUDA(cudaGetLastError());
+      }
     }
 
-    // Step 9: 4th-order differentiation
-    const double fac = double(n) / box;
-    for (int g = 0; g < G; ++g) {
-      CHECK_CUDA(cudaSetDevice(im.devs[g]));
-      const size_t total = size_t(im.nx[g]) * P;
-      dist_differentiate_slab_kernel<<<blocks_for(total), dist_pm_block, 0, im.streams[g]>>>(
-          im.d_slab_real_padded[g], im.d_slab_field[g], im.nx[g], n, fac);
-      CHECK_CUDA(cudaGetLastError());
-    }
-
-    // Step 10: Direct plane gather d_slab_field -> d_local_field
+    // Step 10: Direct plane gather d_slab_field -> d_local_field (or d_local_field_shift)
+    auto& dst_fields = (slot == 1) ? im.d_local_field_shift : im.d_local_field;
     {
       std::vector<std::vector<int>> used(G, std::vector<int>(G, 0));
       im.record_prod();
@@ -977,7 +1095,7 @@ void GravDistPm::solve_and_gather(double box, double split) {
             im.enqueue_xfer(
                 owner, holder,
                 im.d_slab_field[owner] + size_t(r.owner_lx0) * P,
-                im.d_local_field[holder] + size_t(r.holder_lx0) * P,
+                dst_fields[holder] + size_t(r.holder_lx0) * P,
                 size_t(r.count) * P * sizeof(double4),
                 used);
           }
@@ -994,17 +1112,42 @@ void GravDistPm::solve_and_gather(double box, double split) {
   }
 }
 
+void GravDistPm::interpolate_shift(int g, const void* d_x_double3, size_t count,
+                                   double box, float grav_G, void* d_acc_float3,
+                                   float* d_pot_or_null, int slot, double shift,
+                                   float acc_scale, int accumulate) {
+  if (!count) return;
+  auto& im = *impl_;
+  const auto cfg = grav_pm_get_config();
+  const int lnx = int(im.local_planes[g].size());
+  const double4* field = (slot == 1 && im.has_shift_field) ? im.d_local_field_shift[g] : im.d_local_field[g];
+  if (cfg.order == 3) {
+    dist_interpolate_kernel_t<3><<<blocks_for(count), dist_pm_block, 0, im.streams[g]>>>(
+        static_cast<const double3*>(d_x_double3), count,
+        field, im.d_global_to_local_x[g], lnx, im.d_oob[g],
+        im.side, box, grav_G, static_cast<float3*>(d_acc_float3), d_pot_or_null,
+        shift, acc_scale, accumulate);
+  } else if (cfg.order == 4) {
+    dist_interpolate_kernel_t<4><<<blocks_for(count), dist_pm_block, 0, im.streams[g]>>>(
+        static_cast<const double3*>(d_x_double3), count,
+        field, im.d_global_to_local_x[g], lnx, im.d_oob[g],
+        im.side, box, grav_G, static_cast<float3*>(d_acc_float3), d_pot_or_null,
+        shift, acc_scale, accumulate);
+  } else {
+    dist_interpolate_kernel_t<2><<<blocks_for(count), dist_pm_block, 0, im.streams[g]>>>(
+        static_cast<const double3*>(d_x_double3), count,
+        field, im.d_global_to_local_x[g], lnx, im.d_oob[g],
+        im.side, box, grav_G, static_cast<float3*>(d_acc_float3), d_pot_or_null,
+        shift, acc_scale, accumulate);
+  }
+  CHECK_CUDA(cudaGetLastError());
+}
+
 void GravDistPm::interpolate(int g, const void* d_x_double3, size_t count,
                               double box, float grav_G, void* d_acc_float3,
                               float* d_pot_or_null) {
-  if (!count) return;
-  auto& im = *impl_;
-  const int lnx = int(im.local_planes[g].size());
-  dist_interpolate_kernel<<<blocks_for(count), dist_pm_block, 0, im.streams[g]>>>(
-      static_cast<const double3*>(d_x_double3), count,
-      im.d_local_field[g], im.d_global_to_local_x[g], lnx, im.d_oob[g],
-      im.side, box, grav_G, static_cast<float3*>(d_acc_float3), d_pot_or_null);
-  CHECK_CUDA(cudaGetLastError());
+  interpolate_shift(g, d_x_double3, count, box, grav_G, d_acc_float3, d_pot_or_null,
+                    0, 0.0, 1.0f, 0);
 }
 
 void GravDistPm::debug_copy_slab_field_to_host(double4* h_full_field) const {
@@ -1038,10 +1181,12 @@ void GravDistPm::destroy() {
     if (im.plan_1d_z2z[g]) cufftDestroy(im.plan_1d_z2z[g]);
     if (im.buf0[g]) cudaFree(im.buf0[g]);
     if (im.buf1[g]) cudaFree(im.buf1[g]);
+    if (im.buf_phi[g]) cudaFree(im.buf_phi[g]);
     if (im.d_slab_real_padded[g]) cudaFree(im.d_slab_real_padded[g]);
     if (im.d_slab_field[g]) cudaFree(im.d_slab_field[g]);
     if (im.d_local_dens[g]) cudaFree(im.d_local_dens[g]);
     if (im.d_local_field[g]) cudaFree(im.d_local_field[g]);
+    if (im.d_local_field_shift[g]) cudaFree(im.d_local_field_shift[g]);
     if (im.d_global_to_local_x[g]) cudaFree(im.d_global_to_local_x[g]);
     if (im.d_oob[g]) cudaFree(im.d_oob[g]);
     if (im.ev_prod[g]) cudaEventDestroy(im.ev_prod[g]);
@@ -1072,6 +1217,7 @@ void GravDistPm::destroy() {
   im.plan_1d_z2z.clear();
   im.buf0.clear();
   im.buf1.clear();
+  im.buf_phi.clear();
   im.d_slab_real_padded.clear();
   im.d_slab_field.clear();
   im.local_planes.clear();
@@ -1079,6 +1225,8 @@ void GravDistPm::destroy() {
   im.local_field_cap_planes.clear();
   im.d_local_dens.clear();
   im.d_local_field.clear();
+  im.d_local_field_shift.clear();
+  im.has_shift_field = false;
   im.d_global_to_local_x.clear();
   im.d_oob.clear();
   im.fixed_bytes.clear();

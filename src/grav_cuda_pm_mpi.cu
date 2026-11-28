@@ -1,5 +1,6 @@
 #include "config.h"
 #include "grav_cuda_pm_mpi.h"
+#include "grav_pm_config.cuh"
 
 #ifndef SWIFT_KERNEL_LONG_GRAVITY_H
 #ifndef restrict
@@ -62,26 +63,8 @@ __device__ __forceinline__ int wrap_idx(int x, int n) {
   return r < 0 ? r + n : r;
 }
 
-struct MpiCIC {
-  int cell[3];
-  double weight[3][2];
-
-  __device__ MpiCIC(double x0, double x1, double x2, int n, double box) {
-    const double coords[3] = {x0, x1, x2};
-    const double fac = n / box;
-    for (int axis = 0; axis < 3; ++axis) {
-      const double unwrapped = coords[axis];
-      double x = unwrapped;
-      if (x < 0.0 || x >= box) x = unwrapped - floor(unwrapped / box) * box;
-      const double coordinate = fac * x;
-      cell[axis] = min(int(coordinate), n - 1);
-      weight[axis][1] = coordinate - cell[axis];
-      weight[axis][0] = 1.0 - weight[axis][1];
-    }
-  }
-};
-
-__global__ void mpi_deposit_kernel(
+template <int Order>
+__global__ void mpi_deposit_kernel_t(
     const double3* __restrict__ x,
     const float* __restrict__ mass_or_null,
     float uniform_mass,
@@ -91,38 +74,40 @@ __global__ void mpi_deposit_kernel(
     int local_nx,
     int* __restrict__ oob_flag,
     int n,
-    double box) {
+    double box,
+    double shift) {
   const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
   if (i >= count) return;
   const double mp = double(mass_or_null ? mass_or_null[i] : uniform_mass);
   if (mp == 0.0) return;
   const double3 pos = x[i];
-  const MpiCIC cic(pos.x, pos.y, pos.z, n, box);
-  const int y0 = cic.cell[1];
-  const int y1 = (y0 + 1 < n) ? (y0 + 1) : 0;
-  const int z0 = cic.cell[2];
-  const int z1 = (z0 + 1 < n) ? (z0 + 1) : 0;
-  for (int ix = 0; ix < 2; ++ix) {
-    int gx = cic.cell[0] + ix;
-    if (gx >= n) gx -= n;
+  const PmStencil<Order> st(pos.x, pos.y, pos.z, n, box, shift);
+  #pragma unroll
+  for (int ix = 0; ix < Order; ++ix) {
+    const int gx = wrap_idx(st.base[0] + ix, n);
     const int lx = global_to_local_x[gx];
     if (lx < 0 || lx >= local_nx) {
       atomicExch(oob_flag, gx + 1);
       continue;
     }
-    const double mx = mp * cic.weight[0][ix];
+    const double mx = mp * st.weight[0][ix];
     const size_t x_off = size_t(lx) * n * n;
-    for (int iy = 0; iy < 2; ++iy) {
-      const int gy = iy ? y1 : y0;
-      const double mxy = mx * cic.weight[1][iy];
+    #pragma unroll
+    for (int iy = 0; iy < Order; ++iy) {
+      const int gy = wrap_idx(st.base[1] + iy, n);
+      const double mxy = mx * st.weight[1][iy];
       const size_t xy_off = x_off + size_t(gy) * n;
-      atomicAdd(&local_dens[xy_off + size_t(z0)], mxy * cic.weight[2][0]);
-      atomicAdd(&local_dens[xy_off + size_t(z1)], mxy * cic.weight[2][1]);
+      #pragma unroll
+      for (int iz = 0; iz < Order; ++iz) {
+        const int gz = wrap_idx(st.base[2] + iz, n);
+        atomicAdd(&local_dens[xy_off + size_t(gz)], mxy * st.weight[2][iz]);
+      }
     }
   }
 }
 
-__global__ void mpi_interpolate_kernel(
+template <int Order>
+__global__ void mpi_interpolate_kernel_t(
     const double3* __restrict__ x,
     size_t count,
     const double4* __restrict__ local_field,
@@ -133,49 +118,54 @@ __global__ void mpi_interpolate_kernel(
     double box,
     float grav_G,
     float3* __restrict__ acc_out,
-    float* __restrict__ pot_out_or_null) {
+    float* __restrict__ pot_out_or_null,
+    double shift,
+    float acc_scale,
+    int accumulate) {
   const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
   if (i >= count) return;
   const double3 pos = x[i];
-  const MpiCIC cic(pos.x, pos.y, pos.z, n, box);
-  const int y0 = cic.cell[1];
-  const int y1 = (y0 + 1 < n) ? (y0 + 1) : 0;
-  const int z0 = cic.cell[2];
-  const int z1 = (z0 + 1 < n) ? (z0 + 1) : 0;
+  const PmStencil<Order> st(pos.x, pos.y, pos.z, n, box, shift);
   double4 answer{};
-  for (int ix = 0; ix < 2; ++ix) {
-    int gx = cic.cell[0] + ix;
-    if (gx >= n) gx -= n;
+  #pragma unroll
+  for (int ix = 0; ix < Order; ++ix) {
+    const int gx = wrap_idx(st.base[0] + ix, n);
     const int lx = global_to_local_x[gx];
     if (lx < 0 || lx >= local_nx) {
       atomicExch(oob_flag, gx + 1);
       continue;
     }
     const size_t x_off = size_t(lx) * n * n;
-    for (int iy = 0; iy < 2; ++iy) {
-      const int gy = iy ? y1 : y0;
-      const double wxy = cic.weight[0][ix] * cic.weight[1][iy];
+    #pragma unroll
+    for (int iy = 0; iy < Order; ++iy) {
+      const int gy = wrap_idx(st.base[1] + iy, n);
+      const double wxy = st.weight[0][ix] * st.weight[1][iy];
       const size_t xy_off = x_off + size_t(gy) * n;
-      {
-        const double4 c0 = local_field[xy_off + size_t(z0)];
-        const double w0 = wxy * cic.weight[2][0];
-        answer.x += w0 * c0.x;
-        answer.y += w0 * c0.y;
-        answer.z += w0 * c0.z;
-        answer.w += w0 * c0.w;
-      }
-      {
-        const double4 c1 = local_field[xy_off + size_t(z1)];
-        const double w1 = wxy * cic.weight[2][1];
-        answer.x += w1 * c1.x;
-        answer.y += w1 * c1.y;
-        answer.z += w1 * c1.z;
-        answer.w += w1 * c1.w;
+      #pragma unroll
+      for (int iz = 0; iz < Order; ++iz) {
+        const int gz = wrap_idx(st.base[2] + iz, n);
+        const double4 c = local_field[xy_off + size_t(gz)];
+        const double w = wxy * st.weight[2][iz];
+        answer.x += w * c.x;
+        answer.y += w * c.y;
+        answer.z += w * c.z;
+        answer.w += w * c.w;
       }
     }
   }
-  acc_out[i] = {grav_G * float(answer.x), grav_G * float(answer.y), grav_G * float(answer.z)};
-  if (pot_out_or_null) pot_out_or_null[i] = grav_G * float(answer.w);
+  const float s = grav_G * acc_scale;
+  const float ax = s * float(answer.x);
+  const float ay = s * float(answer.y);
+  const float az = s * float(answer.z);
+  if (accumulate) {
+    acc_out[i].x += ax;
+    acc_out[i].y += ay;
+    acc_out[i].z += az;
+    if (pot_out_or_null) pot_out_or_null[i] += s * float(answer.w);
+  } else {
+    acc_out[i] = {ax, ay, az};
+    if (pot_out_or_null) pot_out_or_null[i] = s * float(answer.w);
+  }
 }
 
 __global__ void mpi_add_doubles_kernel(double* __restrict__ dst,
@@ -299,7 +289,8 @@ __global__ void mpi_filter_kernel(
     int n,
     int nz_c,
     double box,
-    double split) {
+    double split,
+    int order) {
   const size_t total = size_t(ny_g) * nz_c * n;
   const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
   if (i >= total) return;
@@ -324,10 +315,54 @@ __global__ void mpi_filter_kernel(
   const double window = arg / (sinh(arg) + FLT_MIN);
 #endif
   const double cic = mpi_inverse_sinc(kx, n) * mpi_inverse_sinc(ky, n) * mpi_inverse_sinc(kz, n);
-  const double square = cic * cic;
-  const double weight = (-1.0 / (mpi_pm_pi * box)) * window / (k2 + FLT_MIN) * square * square;
+  const double deconv = grav_pm_deconv_weight(cic, order);
+  const double weight = (-1.0 / (mpi_pm_pi * box)) * window / (k2 + FLT_MIN) * deconv;
   modes[i].x *= weight;
   modes[i].y *= weight;
+}
+
+__global__ void mpi_spectral_grad_y_kernel(
+    const cufftDoubleComplex* __restrict__ phi_y,
+    cufftDoubleComplex* __restrict__ out_y,
+    int y0_g,
+    int ny_g,
+    int n,
+    int nz_c,
+    double two_pi_over_box,
+    int axis) {
+  const size_t total = size_t(ny_g) * nz_c * n;
+  const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const int half = n / 2;
+  int kx = int(i % n);
+  const size_t tmp = i / n;
+  const int kz = int(tmp % nz_c);
+  const int ly = int(tmp / nz_c);
+  int ky = y0_g + ly;
+  if (kx > half) kx -= n;
+  if (ky > half) ky -= n;
+  int k_int = (axis == 0) ? kx : ((axis == 1) ? ky : kz);
+  if (k_int == half || k_int == -half || k_int == 0) {
+    out_y[i] = {0.0, 0.0};
+    return;
+  }
+  const double k_phys = two_pi_over_box * double(k_int);
+  const cufftDoubleComplex z = phi_y[i];
+  out_y[i] = {k_phys * z.y, -k_phys * z.x};
+}
+
+__global__ void mpi_pack_slab_comp_kernel(
+    const double* __restrict__ src,
+    double4* __restrict__ dst,
+    size_t total,
+    int axis) {
+  const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const double v = src[i];
+  if (axis == 0) dst[i].x = v;
+  else if (axis == 1) dst[i].y = v;
+  else if (axis == 2) dst[i].z = v;
+  else dst[i].w = v;
 }
 
 __device__ __forceinline__ double mpi_stencil(double lo2, double lo1, double hi1, double hi2) {
@@ -408,6 +443,7 @@ struct GravMpiPm::Impl {
   cufftHandle plan_1d_z2z = 0;
   cufftDoubleComplex* buf0 = nullptr;
   cufftDoubleComplex* buf1 = nullptr;
+  cufftDoubleComplex* buf_phi = nullptr;
   double* d_slab_real_padded = nullptr;
   double4* d_slab_field = nullptr;
 
@@ -424,6 +460,8 @@ struct GravMpiPm::Impl {
   size_t local_field_cap_planes = 0;
   double* d_local_dens = nullptr;
   double4* d_local_field = nullptr;
+  double4* d_local_field_shift = nullptr;
+  bool has_shift_field = false;
   int* d_global_to_local_x = nullptr;
   int* d_oob = nullptr;
   size_t fixed_bytes = 0;
@@ -519,13 +557,20 @@ struct GravMpiPm::Impl {
         CHECK_CUDA_PM(cudaFree(d_local_field));
         d_local_field = nullptr;
       }
+      if (d_local_field_shift) {
+        CHECK_CUDA_PM(cudaFree(d_local_field_shift));
+        d_local_field_shift = nullptr;
+      }
       local_field_cap_planes = lnx;
       if (lnx > 0) {
         CHECK_CUDA_PM(cudaMalloc(&d_local_field, lnx * plane * sizeof(double4)));
+        if (has_shift_field) {
+          CHECK_CUDA_PM(cudaMalloc(&d_local_field_shift, lnx * plane * sizeof(double4)));
+        }
       }
     }
     local_bytes = local_dens_cap_planes * plane * sizeof(double) +
-                  local_field_cap_planes * plane * sizeof(double4);
+                  local_field_cap_planes * plane * sizeof(double4) * (has_shift_field ? 2 : 1);
     CHECK_CUDA_PM(cudaStreamSynchronize(stream));
     build_runs();
   }
@@ -668,22 +713,43 @@ void GravMpiPm::begin_deposit() {
   }
 }
 
-void GravMpiPm::deposit(const void* d_x_double3, const float* d_mass_or_null,
-                        float uniform_mass, size_t count, double box) {
+void GravMpiPm::deposit_shift(const void* d_x_double3, const float* d_mass_or_null,
+                              float uniform_mass, size_t count, double box, double shift) {
   if (!count) return;
   auto& im = *impl_;
+  const auto cfg = grav_pm_get_config();
   const int lnx = int(im.local_planes.size());
-  mpi_deposit_kernel<<<blocks_for(count), mpi_pm_block, 0, im.stream>>>(
-      static_cast<const double3*>(d_x_double3),
-      d_mass_or_null, uniform_mass, count,
-      im.d_local_dens, im.d_global_to_local_x, lnx, im.d_oob,
-      im.side, box);
+  if (cfg.order == 3) {
+    mpi_deposit_kernel_t<3><<<blocks_for(count), mpi_pm_block, 0, im.stream>>>(
+        static_cast<const double3*>(d_x_double3),
+        d_mass_or_null, uniform_mass, count,
+        im.d_local_dens, im.d_global_to_local_x, lnx, im.d_oob,
+        im.side, box, shift);
+  } else if (cfg.order == 4) {
+    mpi_deposit_kernel_t<4><<<blocks_for(count), mpi_pm_block, 0, im.stream>>>(
+        static_cast<const double3*>(d_x_double3),
+        d_mass_or_null, uniform_mass, count,
+        im.d_local_dens, im.d_global_to_local_x, lnx, im.d_oob,
+        im.side, box, shift);
+  } else {
+    mpi_deposit_kernel_t<2><<<blocks_for(count), mpi_pm_block, 0, im.stream>>>(
+        static_cast<const double3*>(d_x_double3),
+        d_mass_or_null, uniform_mass, count,
+        im.d_local_dens, im.d_global_to_local_x, lnx, im.d_oob,
+        im.side, box, shift);
+  }
   CHECK_CUDA_PM(cudaGetLastError());
 }
 
-void GravMpiPm::solve_and_gather(double box, double split) {
+void GravMpiPm::deposit(const void* d_x_double3, const float* d_mass_or_null,
+                        float uniform_mass, size_t count, double box) {
+  deposit_shift(d_x_double3, d_mass_or_null, uniform_mass, count, box, 0.0);
+}
+
+void GravMpiPm::solve_and_gather(double box, double split, int slot) {
   auto& im = *impl_;
   if (!im.active) throw std::runtime_error("GravMpiPm not initialized");
+  const auto cfg = grav_pm_get_config();
   CHECK_CUDA_PM(cudaSetDevice(im.mpi->cuda_dev));
 
   const int G = im.G;
@@ -694,6 +760,21 @@ void GravMpiPm::solve_and_gather(double box, double split) {
   const int ny_my = im.ny[r];
   const size_t P = size_t(n) * size_t(n);
   double comm_sec = 0.0;
+
+  if (slot == 1 && !im.has_shift_field) {
+    im.has_shift_field = true;
+    if (im.local_field_cap_planes > 0) {
+      CHECK_CUDA_PM(cudaMalloc(&im.d_local_field_shift, im.local_field_cap_planes * P * sizeof(double4)));
+    }
+    im.local_bytes = im.local_dens_cap_planes * P * sizeof(double) +
+                     im.local_field_cap_planes * P * sizeof(double4) * 2;
+  }
+  if (cfg.spectral_grad && !im.buf_phi) {
+    const int m_max = std::max(nx_my, ny_my);
+    const size_t cpx_bytes = size_t(m_max) * size_t(n) * size_t(nz_c) * sizeof(cufftDoubleComplex);
+    CHECK_CUDA_PM(cudaMalloc(&im.buf_phi, cpx_bytes));
+    im.fixed_bytes += cpx_bytes;
+  }
 
   // Step 2: Reduce-scatter of held X-planes -> canonical X-slab interior
   double* interior = im.d_slab_real_padded + 2 * P;
@@ -789,87 +870,108 @@ void GravMpiPm::solve_and_gather(double box, double split) {
     CHECK_CUDA_PM(cudaGetLastError());
   }
 
-  // Step 5: 1D Z2Z Forward -> Filter -> 1D Z2Z Inverse
+  // Step 5: 1D Z2Z Forward -> Filter
   CHECK_CUFFT_PM(cufftExecZ2Z(im.plan_1d_z2z, im.buf1, im.buf1, CUFFT_FORWARD));
   {
     const size_t total = size_t(ny_my) * nz_c * n;
     mpi_filter_kernel<<<blocks_for(total), mpi_pm_block, 0, im.stream>>>(
-        im.buf1, im.y0[r], ny_my, n, nz_c, box, split);
+        im.buf1, im.y0[r], ny_my, n, nz_c, box, split, cfg.order);
     CHECK_CUDA_PM(cudaGetLastError());
   }
-  CHECK_CUFFT_PM(cufftExecZ2Z(im.plan_1d_z2z, im.buf1, im.buf1, CUFFT_INVERSE));
 
-  // Step 6: Pack Y->X, MPI Alltoallv, Unpack Y->X
-  {
-    const size_t total = size_t(ny_my) * nz_c * n;
-    mpi_pack_yx_kernel<<<blocks_for(total), mpi_pm_block, 0, im.stream>>>(
-        im.buf1, im.buf0, ny_my, n, nz_c, im.d_x0, G);
-    CHECK_CUDA_PM(cudaGetLastError());
-  }
-  if (G == 1) {
-    const size_t bytes = size_t(ny_my) * size_t(n) * size_t(nz_c) * sizeof(cufftDoubleComplex);
-    CHECK_CUDA_PM(cudaMemcpyAsync(im.buf1, im.buf0, bytes, cudaMemcpyDeviceToDevice, im.stream));
-  } else {
-    std::vector<int> send_bytes(G, 0), recv_bytes, recv_displs;
-    for (int p = 0; p < G; ++p) {
-      send_bytes[p] = int(size_t(im.nx[p]) * size_t(ny_my) * size_t(nz_c) * sizeof(cufftDoubleComplex));
+  auto inverse_y_to_x_real = [&]() {
+    CHECK_CUFFT_PM(cufftExecZ2Z(im.plan_1d_z2z, im.buf1, im.buf1, CUFFT_INVERSE));
+    {
+      const size_t total = size_t(ny_my) * nz_c * n;
+      mpi_pack_yx_kernel<<<blocks_for(total), mpi_pm_block, 0, im.stream>>>(
+          im.buf1, im.buf0, ny_my, n, nz_c, im.d_x0, G);
+      CHECK_CUDA_PM(cudaGetLastError());
     }
-    const double t0 = MPI_Wtime();
-    im.mpi->alltoallv_bytes_dev(im.buf0, send_bytes,
-                                im.buf1, recv_bytes, recv_displs,
-                                im.stream, im.h_xfer_send, im.h_xfer_recv);
-    comm_sec += MPI_Wtime() - t0;
-  }
-  {
-    const size_t total = size_t(nx_my) * n * nz_c;
-    mpi_unpack_yx_kernel<<<blocks_for(total), mpi_pm_block, 0, im.stream>>>(
-        im.buf1, im.buf0, nx_my, n, nz_c, im.d_y0, G);
-    CHECK_CUDA_PM(cudaGetLastError());
-  }
+    if (G == 1) {
+      const size_t bytes = size_t(ny_my) * size_t(n) * size_t(nz_c) * sizeof(cufftDoubleComplex);
+      CHECK_CUDA_PM(cudaMemcpyAsync(im.buf1, im.buf0, bytes, cudaMemcpyDeviceToDevice, im.stream));
+    } else {
+      std::vector<int> send_bytes(G, 0), recv_bytes, recv_displs;
+      for (int p = 0; p < G; ++p) {
+        send_bytes[p] = int(size_t(im.nx[p]) * size_t(ny_my) * size_t(nz_c) * sizeof(cufftDoubleComplex));
+      }
+      const double t0 = MPI_Wtime();
+      im.mpi->alltoallv_bytes_dev(im.buf0, send_bytes,
+                                  im.buf1, recv_bytes, recv_displs,
+                                  im.stream, im.h_xfer_send, im.h_xfer_recv);
+      comm_sec += MPI_Wtime() - t0;
+    }
+    {
+      const size_t total = size_t(nx_my) * n * nz_c;
+      mpi_unpack_yx_kernel<<<blocks_for(total), mpi_pm_block, 0, im.stream>>>(
+          im.buf1, im.buf0, nx_my, n, nz_c, im.d_y0, G);
+      CHECK_CUDA_PM(cudaGetLastError());
+    }
+    CHECK_CUFFT_PM(cufftExecZ2D(im.plan_2d_z2d, im.buf0, interior));
+  };
 
-  // Step 7: 2D Z2D cuFFT -> real potential in d_slab_real_padded + 2*P
-  CHECK_CUFFT_PM(cufftExecZ2D(im.plan_2d_z2d, im.buf0, interior));
-
-  // Step 8: 2-plane periodic X halo exchange
-  const size_t halo_bytes = 2 * P * sizeof(double);
-  if (G == 1) {
-    CHECK_CUDA_PM(cudaMemcpyAsync(im.d_slab_real_padded + size_t(nx_my + 2) * P,
-                                  im.d_slab_real_padded + 2 * P,
-                                  halo_bytes, cudaMemcpyDeviceToDevice, im.stream));
-    CHECK_CUDA_PM(cudaMemcpyAsync(im.d_slab_real_padded,
-                                  im.d_slab_real_padded + size_t(nx_my) * P,
-                                  halo_bytes, cudaMemcpyDeviceToDevice, im.stream));
+  if (cfg.spectral_grad) {
+    const size_t bytes = size_t(ny_my) * nz_c * n * sizeof(cufftDoubleComplex);
+    CHECK_CUDA_PM(cudaMemcpyAsync(im.buf_phi, im.buf1, bytes, cudaMemcpyDeviceToDevice, im.stream));
+    const double two_pi_over_box = 2.0 * mpi_pm_pi / box;
+    const int axes[4] = {3, 0, 1, 2};
+    for (int pass = 0; pass < 4; ++pass) {
+      const int axis = axes[pass];
+      if (pass > 0) {
+        const size_t total = size_t(ny_my) * nz_c * n;
+        mpi_spectral_grad_y_kernel<<<blocks_for(total), mpi_pm_block, 0, im.stream>>>(
+            im.buf_phi, im.buf1, im.y0[r], ny_my, n, nz_c, two_pi_over_box, axis);
+        CHECK_CUDA_PM(cudaGetLastError());
+      }
+      inverse_y_to_x_real();
+      const size_t total = size_t(nx_my) * P;
+      mpi_pack_slab_comp_kernel<<<blocks_for(total), mpi_pm_block, 0, im.stream>>>(
+          interior, im.d_slab_field, total, axis);
+      CHECK_CUDA_PM(cudaGetLastError());
+    }
   } else {
-    const int left_r = (r - 1 + G) % G;
-    const int right_r = (r + 1) % G;
-    const double t0 = MPI_Wtime();
-    // Round A: send left 2 planes -> left_r's right halo; recv right_r's left 2 planes -> my right halo
-    im.mpi->exchange_sparse_dev(
-        {left_r}, {im.d_slab_real_padded + 2 * P}, {int(halo_bytes)}, im.h_halo_send_scratch,
-        {right_r}, {im.d_slab_real_padded + size_t(nx_my + 2) * P}, {int(halo_bytes)}, im.h_halo_recv_scratch,
-        41, im.stream);
-    // Round B: send right 2 planes -> right_r's left halo; recv left_r's right 2 planes -> my left halo
-    im.mpi->exchange_sparse_dev(
-        {right_r}, {im.d_slab_real_padded + size_t(nx_my) * P}, {int(halo_bytes)}, im.h_halo_send_scratch,
-        {left_r}, {im.d_slab_real_padded}, {int(halo_bytes)}, im.h_halo_recv_scratch,
-        42, im.stream);
-    comm_sec += MPI_Wtime() - t0;
+    inverse_y_to_x_real();
+
+    // Step 8: 2-plane periodic X halo exchange
+    const size_t halo_bytes = 2 * P * sizeof(double);
+    if (G == 1) {
+      CHECK_CUDA_PM(cudaMemcpyAsync(im.d_slab_real_padded + size_t(nx_my + 2) * P,
+                                    im.d_slab_real_padded + 2 * P,
+                                    halo_bytes, cudaMemcpyDeviceToDevice, im.stream));
+      CHECK_CUDA_PM(cudaMemcpyAsync(im.d_slab_real_padded,
+                                    im.d_slab_real_padded + size_t(nx_my) * P,
+                                    halo_bytes, cudaMemcpyDeviceToDevice, im.stream));
+    } else {
+      const int left_r = (r - 1 + G) % G;
+      const int right_r = (r + 1) % G;
+      const double t0 = MPI_Wtime();
+      im.mpi->exchange_sparse_dev(
+          {left_r}, {im.d_slab_real_padded + 2 * P}, {int(halo_bytes)}, im.h_halo_send_scratch,
+          {right_r}, {im.d_slab_real_padded + size_t(nx_my + 2) * P}, {int(halo_bytes)}, im.h_halo_recv_scratch,
+          41, im.stream);
+      im.mpi->exchange_sparse_dev(
+          {right_r}, {im.d_slab_real_padded + size_t(nx_my) * P}, {int(halo_bytes)}, im.h_halo_send_scratch,
+          {left_r}, {im.d_slab_real_padded}, {int(halo_bytes)}, im.h_halo_recv_scratch,
+          42, im.stream);
+      comm_sec += MPI_Wtime() - t0;
+    }
+
+    // Step 9: 4th-order differentiation
+    {
+      const double fac = double(n) / box;
+      const size_t total = size_t(nx_my) * P;
+      mpi_differentiate_slab_kernel<<<blocks_for(total), mpi_pm_block, 0, im.stream>>>(
+          im.d_slab_real_padded, im.d_slab_field, nx_my, n, fac);
+      CHECK_CUDA_PM(cudaGetLastError());
+    }
   }
 
-  // Step 9: 4th-order differentiation
-  {
-    const double fac = double(n) / box;
-    const size_t total = size_t(nx_my) * P;
-    mpi_differentiate_slab_kernel<<<blocks_for(total), mpi_pm_block, 0, im.stream>>>(
-        im.d_slab_real_padded, im.d_slab_field, nx_my, n, fac);
-    CHECK_CUDA_PM(cudaGetLastError());
-  }
-
-  // Step 10: Gather d_slab_field -> d_local_field
+  // Step 10: Gather d_slab_field -> d_local_field (or d_local_field_shift)
+  double4* dst_local_field = (slot == 1) ? im.d_local_field_shift : im.d_local_field;
   for (const auto& rn : im.runs[r][r]) {
     const size_t bytes = size_t(rn.count) * P * sizeof(double4);
     CHECK_CUDA_PM(cudaMemcpyAsync(
-        im.d_local_field + size_t(rn.holder_lx0) * P,
+        dst_local_field + size_t(rn.holder_lx0) * P,
         im.d_slab_field + size_t(rn.owner_lx0) * P,
         bytes, cudaMemcpyDeviceToDevice, im.stream));
   }
@@ -915,7 +1017,7 @@ void GravMpiPm::solve_and_gather(double box, double split) {
       for (const auto& rn : im.runs[r][src]) {
         const size_t bytes = size_t(rn.count) * P * sizeof(double4);
         CHECK_CUDA_PM(cudaMemcpyAsync(
-            im.d_local_field + size_t(rn.holder_lx0) * P,
+            dst_local_field + size_t(rn.holder_lx0) * P,
             recv_buf + off * P,
             bytes, cudaMemcpyDeviceToDevice, im.stream));
         off += size_t(rn.count);
@@ -927,17 +1029,42 @@ void GravMpiPm::solve_and_gather(double box, double split) {
   im.check_oob();
 }
 
+void GravMpiPm::interpolate_shift(const void* d_x_double3, size_t count,
+                                  double box, float grav_G, void* d_acc_float3,
+                                  float* d_pot_or_null, int slot, double shift,
+                                  float acc_scale, int accumulate) {
+  if (!count) return;
+  auto& im = *impl_;
+  const auto cfg = grav_pm_get_config();
+  const int lnx = int(im.local_planes.size());
+  const double4* field = (slot == 1 && im.has_shift_field) ? im.d_local_field_shift : im.d_local_field;
+  if (cfg.order == 3) {
+    mpi_interpolate_kernel_t<3><<<blocks_for(count), mpi_pm_block, 0, im.stream>>>(
+        static_cast<const double3*>(d_x_double3), count,
+        field, im.d_global_to_local_x, lnx, im.d_oob,
+        im.side, box, grav_G, static_cast<float3*>(d_acc_float3), d_pot_or_null,
+        shift, acc_scale, accumulate);
+  } else if (cfg.order == 4) {
+    mpi_interpolate_kernel_t<4><<<blocks_for(count), mpi_pm_block, 0, im.stream>>>(
+        static_cast<const double3*>(d_x_double3), count,
+        field, im.d_global_to_local_x, lnx, im.d_oob,
+        im.side, box, grav_G, static_cast<float3*>(d_acc_float3), d_pot_or_null,
+        shift, acc_scale, accumulate);
+  } else {
+    mpi_interpolate_kernel_t<2><<<blocks_for(count), mpi_pm_block, 0, im.stream>>>(
+        static_cast<const double3*>(d_x_double3), count,
+        field, im.d_global_to_local_x, lnx, im.d_oob,
+        im.side, box, grav_G, static_cast<float3*>(d_acc_float3), d_pot_or_null,
+        shift, acc_scale, accumulate);
+  }
+  CHECK_CUDA_PM(cudaGetLastError());
+}
+
 void GravMpiPm::interpolate(const void* d_x_double3, size_t count,
                             double box, float grav_G, void* d_acc_float3,
                             float* d_pot_or_null) {
-  if (!count) return;
-  auto& im = *impl_;
-  const int lnx = int(im.local_planes.size());
-  mpi_interpolate_kernel<<<blocks_for(count), mpi_pm_block, 0, im.stream>>>(
-      static_cast<const double3*>(d_x_double3), count,
-      im.d_local_field, im.d_global_to_local_x, lnx, im.d_oob,
-      im.side, box, grav_G, static_cast<float3*>(d_acc_float3), d_pot_or_null);
-  CHECK_CUDA_PM(cudaGetLastError());
+  interpolate_shift(d_x_double3, count, box, grav_G, d_acc_float3, d_pot_or_null,
+                    0, 0.0, 1.0f, 0);
 }
 
 void GravMpiPm::debug_copy_local_slab_field_to_host(double4* h_local_slab, int& out_x0, int& out_nx) const {
@@ -967,22 +1094,25 @@ void GravMpiPm::destroy() {
   if (im.d_y0) cudaFree(im.d_y0);
   if (im.buf0) cudaFree(im.buf0);
   if (im.buf1) cudaFree(im.buf1);
+  if (im.buf_phi) cudaFree(im.buf_phi);
   if (im.d_slab_real_padded) cudaFree(im.d_slab_real_padded);
   if (im.d_slab_field) cudaFree(im.d_slab_field);
   if (im.d_xfer_send) cudaFree(im.d_xfer_send);
   if (im.d_xfer_recv) cudaFree(im.d_xfer_recv);
   if (im.d_local_dens) cudaFree(im.d_local_dens);
   if (im.d_local_field) cudaFree(im.d_local_field);
+  if (im.d_local_field_shift) cudaFree(im.d_local_field_shift);
   if (im.d_global_to_local_x) cudaFree(im.d_global_to_local_x);
   if (im.d_oob) cudaFree(im.d_oob);
   im.plan_2d_d2z = im.plan_2d_z2d = im.plan_1d_z2z = 0;
   im.d_x0 = im.d_y0 = nullptr;
-  im.buf0 = im.buf1 = nullptr;
+  im.buf0 = im.buf1 = im.buf_phi = nullptr;
   im.d_slab_real_padded = nullptr;
   im.d_slab_field = nullptr;
   im.d_xfer_send = im.d_xfer_recv = nullptr;
   im.d_local_dens = nullptr;
-  im.d_local_field = nullptr;
+  im.d_local_field = im.d_local_field_shift = nullptr;
+  im.has_shift_field = false;
   im.d_global_to_local_x = im.d_oob = nullptr;
   im.xfer_send_cap = im.xfer_recv_cap = 0;
   im.local_dens_cap_planes = im.local_field_cap_planes = 0;

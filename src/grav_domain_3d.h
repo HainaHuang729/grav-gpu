@@ -603,7 +603,9 @@ inline Domain3DPlan build_domain_3d_plan_from_owners(
     DomainMode mode,
     int pm_side,
     int chosen_rot = 0,
-    const std::vector<std::vector<int>>* can_peer = nullptr) {
+    const std::vector<std::vector<int>>* can_peer = nullptr,
+    int pm_x_halo_lo = 1,
+    int pm_x_halo_hi = 1) {
   std::array<int, N_TOP_CELLS> eff_owner = cell_owner;
   for (int cid = 0; cid < N_TOP_CELLS; ++cid) {
     if (eff_owner[cid] < 0 || eff_owner[cid] >= num_gpus) {
@@ -722,15 +724,15 @@ inline Domain3DPlan build_domain_3d_plan_from_owners(
       }
     }
 
-    // Distributed PM X planes covering all owned tx slices with CIC [-1, +1] margin.
+    // Distributed PM X planes covering all owned tx slices with configurable [-lo, +hi] halo margin.
     if (pm_side > 0) {
       std::array<bool, N_TOP> owns_tx{};
       for (int cid : plan.own_cells[dst]) owns_tx[cid / (N_TOP * N_TOP)] = true;
       std::vector<uint8_t> xmark(pm_side, 0);
       for (int tx = 0; tx < N_TOP; ++tx) {
         if (!owns_tx[tx]) continue;
-        const int px_lo = int(std::floor(double(tx) * pm_side / double(N_TOP))) - 1;
-        const int px_hi = int(std::ceil(double(tx + 1) * pm_side / double(N_TOP))) + 1;
+        const int px_lo = int(std::floor(double(tx) * pm_side / double(N_TOP))) - pm_x_halo_lo;
+        const int px_hi = int(std::ceil(double(tx + 1) * pm_side / double(N_TOP))) + pm_x_halo_hi;
         for (int px = px_lo; px <= px_hi; ++px) {
           int gx = px % pm_side;
           if (gx < 0) gx += pm_side;
@@ -783,7 +785,9 @@ inline Domain3DPlan build_domain_3d_plan(
     int num_gpus,
     DomainMode mode,
     int pm_side,
-    const std::vector<std::vector<int>>* can_peer = nullptr) {
+    const std::vector<std::vector<int>>* can_peer = nullptr,
+    int pm_x_halo_lo = 1,
+    int pm_x_halo_hi = 1) {
   std::array<int, N_TOP_CELLS> cell_owner{};
   int chosen_rot = 0;
   if (mode == DomainMode::Orb3D) {
@@ -795,7 +799,8 @@ inline Domain3DPlan build_domain_3d_plan(
     detail::remap_owners_for_nvlink(counts, num_gpus, *can_peer, cell_owner);
   }
   return build_domain_3d_plan_from_owners(
-      counts, weights, cell_owner, num_gpus, mode, pm_side, chosen_rot, nullptr);
+      counts, weights, cell_owner, num_gpus, mode, pm_side, chosen_rot, nullptr,
+      pm_x_halo_lo, pm_x_halo_hi);
 }
 
 struct MultiNodeCommStats {

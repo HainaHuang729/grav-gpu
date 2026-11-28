@@ -57,11 +57,18 @@ void grav_pm_cuda_interpolate_double3(const void *d_x_double3, size_t count,
                                        void *stream);
 
 /* Stateless / explicit-buffer multi-GPU PM APIs. */
+void grav_pm_cuda_set_config(int order, int interlace, int spectral_grad);
+
 void grav_pm_cuda_deposit_buf(const void *d_x_double3,
                                const float *d_mass_or_null,
                                float uniform_mass, size_t count,
                                double *d_density, int side, double box,
                                void *stream);
+void grav_pm_cuda_deposit_buf_shift(const void *d_x_double3,
+                                     const float *d_mass_or_null,
+                                     float uniform_mass, size_t count,
+                                     double *d_density, int side, double box,
+                                     double shift, void *stream);
 /* Note: overwrites d_density in-place with filtered real-space potential. */
 void grav_pm_cuda_solve_on_device(double *d_density, void *d_field_double4,
                                    int side, double box, double split,
@@ -71,6 +78,12 @@ void grav_pm_cuda_interpolate_buf(const void *d_x_double3, size_t count,
                                    double box, float grav_G,
                                    void *d_acc_float3, float *d_pot_or_null,
                                    void *stream);
+void grav_pm_cuda_interpolate_buf_shift(const void *d_x_double3, size_t count,
+                                         const void *d_field_double4, int side,
+                                         double box, float grav_G,
+                                         void *d_acc_float3, float *d_pot_or_null,
+                                         double shift, float acc_scale,
+                                         int accumulate, void *stream);
 
 #ifdef __cplusplus
 }

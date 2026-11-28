@@ -43,11 +43,16 @@ class GravMpiPm {
   void begin_deposit();
   void deposit(const void* d_x_double3, const float* d_mass_or_null,
                float uniform_mass, size_t count, double box);
+  void deposit_shift(const void* d_x_double3, const float* d_mass_or_null,
+                     float uniform_mass, size_t count, double box, double shift);
 
-  void solve_and_gather(double box, double split);
+  void solve_and_gather(double box, double split, int slot = 0);
 
   void interpolate(const void* d_x_double3, size_t count, double box,
                    float grav_G, void* d_acc_float3, float* d_pot_or_null);
+  void interpolate_shift(const void* d_x_double3, size_t count, double box,
+                         float grav_G, void* d_acc_float3, float* d_pot_or_null,
+                         int slot, double shift, float acc_scale, int accumulate);
 
   /* Copies canonical local slab field [nx_my, side, side] double4 to host. */
   void debug_copy_local_slab_field_to_host(double4* h_local_slab, int& out_x0, int& out_nx) const;

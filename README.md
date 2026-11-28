@@ -101,13 +101,15 @@ make smoke  KERNEL_BUILD_DIR=/path/to/swiftsim CUDA_ARCH=sm_86 CXX=g++
 
 This generates `build/smoke_64.bin` (`64^3` clustered periodic box), evolves `a = 0.85 -> 0.92` on all visible GPUs using `3d_hilbert` (or `1d_slab` on 1 GPU) with inline multi-GPU FoF, and runs `compute_fof_catalog` + `compute_fof_so` via `build/grav_cuda_fof.so`, printing `ALL_SMOKE_TESTS_PASSED`.
 
-### Option C: Real SWIFT HDF5 Snapshot Workflow
+### Option C: SWIFT, `monofonIC`, or `MUSIC` HDF5 IC Workflow
 
 ```bash
-# 1. Convert SWIFT PartType1 HDF5 IC/snapshot into dense internal binary
-python3 scripts/prepare_input.py input_snap.hdf5 input.bin
+# 1. Convert SWIFT / monofonIC / MUSIC / Gadget HDF5 (single or multi-shard) into dense binary
+#    Auto-converts kpc/h & Mpc/h -> Mpc, Gadget u=v/sqrt(a) -> v_pec, MassTable fallback, Zoom-in PartTypes
+python3 scripts/prepare_input.py input_snap.hdf5 input.bin --cosmo-env input.cosmo.env
 
 # 2. Run multi-GPU VRAM-resident TreePM + inline FoF to final scale factor a_end=1.0
+source input.cosmo.env
 GRAV_NUM_GPUS=4 GRAV_DOMAIN_MODE=auto GRAV_DYNAMIC_PM=1 GRAV_PM_DIST=1 \
 GRAV_SPLIT_FORCE=1 GRAV_LAZY_TREE=1 GRAV_P2P_MODE=nvlink \
 GRAV_RUN_FOF=1 GRAV_FOF_LINK_RATIO=0.2 GRAV_FOF_MIN_SIZE=32 \
@@ -118,7 +120,7 @@ python3 scripts/to-hdf5-from-source.py input_snap.hdf5 evolved.bin output_snap.h
   --fof-bin evolved.bin.fof.bin --fof-lib build/grav_cuda_fof.so
 ```
 
-Note: `prepare_input.py` works for any $N$ (`64^3`–`1024^3`); [scripts/prepare_1024_input.py](scripts/prepare_1024_input.py) is kept specifically for reproducing the original $1024^3$ scripts.
+Ready-to-use `monofonIC` (2LPT/3LPT) and `MUSIC` (Zoom-in multi-mass) templates live in [configs/ic/](configs/ic/README.md), verified via `make test-ic`. Note: `prepare_input.py` works for any $N$ (`64^3`–`1024^3`); [scripts/prepare_1024_input.py](scripts/prepare_1024_input.py) is kept specifically for reproducing the original $1024^3$ scripts.
 
 ---
 
@@ -132,6 +134,10 @@ Note: `prepare_input.py` works for any $N$ (`64^3`–`1024^3`); [scripts/prepare
 | `GRAV_DYNAMIC_PM` | unset (`0`) | Set `GRAV_DYNAMIC_PM=1` for periodic cosmological PM step scaling (`16` PM intervals) |
 | `GRAV_PM_DIST` | `1` (when `G > 1`) | Distributed multi-GPU FFT PM solver (`0` disables) |
 | `GRAV_PM_GRID` | `128` | PM FFT grid size (power of 2 in `32..1024`) |
+| `GRAV_PM_ORDER` | `2` (`cic`) | PM mass-assignment / interpolation order: `2` (`cic`), `3` (`tsc`), or `4` (`pcs`) with matched $\text{sinc}^{-2p}$ deconvolution |
+| `GRAV_PM_INTERLACE` | `0` | Set `1` for symmetric half-cell interlaced PM (cancels odd aliases while preserving zero self-force & momentum conservation) |
+| `GRAV_PM_GRAD` | `fd4` | PM force gradient operator: `fd4` (4th-order finite difference, SWIFT default) or `ik` (exact $-i\mathbf{k}$ spectral gradient) |
+| `GRAV_PM_ASMTH` | `1.25` | TreePM split scale ratio $r_s/\Delta x$ (default `1.25` matches SWIFT; also scales short-range cutoff $4.5\,r_s$) |
 | `GRAV_SPLIT_FORCE` | `1` (periodic) | Split traversal / M2P / M2L / P2P kernels (required for 3D domain modes) |
 | `GRAV_LAZY_TREE` | `1` (periodic) | Lazy node refit across active sub-steps |
 | `GRAV_REBALANCE_INTERVAL` | `8` | Rebalance cadence in steps for 3D domains (`0` disables live rebalancing) |

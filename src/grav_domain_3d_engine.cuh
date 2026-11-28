@@ -1248,7 +1248,7 @@ struct Dom3DGpuCtx {
   DevPtr<DevMigrant> d_mig_out, d_mig_in;
   DevPtr<Meta> d_stats;
   DevPtr<double> d_kick_finish, d_kick_begin, d_pm_density;
-  DevPtr<double4> d_pm_field;
+  DevPtr<double4> d_pm_field, d_pm_field_shift;
   DevPtr<ScanPartial> d_scan_tmp;
   std::vector<ScanPartial> h_scan;
   PinnedHostBuf h_bounce;
@@ -1408,7 +1408,7 @@ struct Dom3DGpuCtx {
     d_active_bits.free(device_bytes); d_cell_counts.free(device_bytes); d_cell_act_counts.free(device_bytes);
     d_mig_out.free(device_bytes); d_mig_in.free(device_bytes);
     d_stats.free(device_bytes); d_kick_finish.free(device_bytes); d_kick_begin.free(device_bytes);
-    d_pm_density.free(device_bytes); d_pm_field.free(device_bytes); d_scan_tmp.free(device_bytes);
+    d_pm_density.free(device_bytes); d_pm_field.free(device_bytes); d_pm_field_shift.free(device_bytes); d_scan_tmp.free(device_bytes);
     gh_geometry.free(device_bytes); gh_node_meta.free(device_bytes); gh_compact_m.free(device_bytes);
     gh_packed_sources.free(device_bytes); gh_packed_soft.free(device_bytes);
     d_split_slices.free(device_bytes); d_split_meta.free(device_bytes);
@@ -1555,10 +1555,19 @@ inline int run_domain_3d_evolution(
   const int leaf_limit = cfg.leaf_limit;
   const double inv_cell_w = double(N_TOP) / h.box;
 
+  const GravPmConfig pm_cfg = grav_pm_get_config();
+  const int pm_halo_lo = grav_pm_x_halo_lo(pm_cfg.order, pm_cfg.interlace);
+  const int pm_halo_hi = grav_pm_x_halo_hi(pm_cfg.order, pm_cfg.interlace);
+  std::printf("PM_CONFIG order=%d interlace=%d grad=%s asmth=%.4f halo=[-%d,+%d]\n",
+              pm_cfg.order, pm_cfg.interlace, pm_cfg.spectral_grad ? "ik" : "fd4",
+              pm_cfg.asmth, pm_halo_lo, pm_halo_hi);
+  std::fflush(stdout);
+
   std::array<double, N_TOP_CELLS> init_weights{};
   for (int c = 0; c < N_TOP_CELLS; ++c) init_weights[c] = double(cfg.init_cell_counts[c]);
   Domain3DPlan plan = build_domain_3d_plan(
-      cfg.init_cell_counts, init_weights, num_gpus, cfg.domain_mode, pm_side, &cfg.can_peer);
+      cfg.init_cell_counts, init_weights, num_gpus, cfg.domain_mode, pm_side, &cfg.can_peer,
+      pm_halo_lo, pm_halo_hi);
 
   // Pass 2: stream input particles directly into per-GPU host staging
   std::vector<HostSlabStaging> h_gpu_stage(num_gpus);
@@ -1696,6 +1705,7 @@ inline int run_domain_3d_evolution(
     if (!cfg.pm_dist_enabled) {
       G.d_pm_density.alloc(pm_points, G.device_bytes);
       G.d_pm_field.alloc(pm_points, G.device_bytes);
+      if (pm_cfg.interlace) G.d_pm_field_shift.alloc(pm_points, G.device_bytes);
     }
     G.d_scan_tmp.alloc(scan_grid_max, G.device_bytes);
     G.h_scan.resize(scan_grid_max);
@@ -1787,7 +1797,7 @@ inline int run_domain_3d_evolution(
       : float(h.plummer_softening * kernel_gravity_softening_plummer_equivalent);
   const double rho_crit0 = 3.0 * cfg.cosmo_h0 * cfg.cosmo_h0 / (8.0 * acos(-1.0) * double(cfg.grav_G));
   const double d_dm = cbrt(cfg.min_mass / (cfg.cosmo_ocdm * rho_crit0));
-  const double r_s = 1.25 * h.box / double(pm_side);
+  const double r_s = pm_cfg.asmth * h.box / double(pm_side);
 
   Physics p{knots[0], log_span,
       float(h.box), float(r_s), float(4.5 * r_s), cfg.grav_G,
@@ -2559,7 +2569,8 @@ inline int run_domain_3d_evolution(
             steps_since_rebal = 0;
             const double cur_imb = detail::compute_load_imbalance(cur_w, plan.cell_owner, num_gpus);
             Domain3DPlan cand_plan = build_domain_3d_plan(
-                cur_cnt, cur_w, num_gpus, cfg.domain_mode, pm_side, &cfg.can_peer);
+                cur_cnt, cur_w, num_gpus, cfg.domain_mode, pm_side, &cfg.can_peer,
+                pm_halo_lo, pm_halo_hi);
             const double new_imb = cand_plan.stats.w_imb;
             const double gain = (cur_imb - new_imb) / std::max(cur_imb, 1e-12);
             if (gain >= cfg.rebalance_min_gain) {
@@ -2681,24 +2692,49 @@ inline int run_domain_3d_evolution(
             }
             check(cudaStreamSynchronize(G.compute_stream));
 #pragma omp barrier
-            if (g == 0) dist_pm.solve_and_gather(h.box, r_s);
+            if (g == 0) dist_pm.solve_and_gather(h.box, r_s, 0);
 #pragma omp barrier
             if (G.ns > 0) {
-              dist_pm.interpolate(g, G.d_x.p, G.ns, h.box, p.G, G.d_mesh_acc.p, nullptr);
+              dist_pm.interpolate_shift(g, G.d_x.p, G.ns, h.box, p.G, G.d_mesh_acc.p, nullptr,
+                                        0, 0.0, pm_cfg.interlace ? 0.5f : 1.0f, 0);
             }
             check(cudaStreamSynchronize(G.compute_stream));
 #pragma omp barrier
-          } else {
-            check(cudaMemsetAsync(G.d_pm_density.p, 0, pm_points * sizeof(double), G.compute_stream));
-            if (G.ns > 0) {
-              grav_pm_cuda_deposit_buf(
-                  G.d_x.p, mass_uniform ? nullptr : G.d_mass.p, first_mass,
-                  G.ns, G.d_pm_density.p, pm_side, h.box, G.compute_stream);
+            if (pm_cfg.interlace) {
+              dist_pm.begin_deposit(g);
+              if (G.ns > 0) {
+                dist_pm.deposit_shift(g, G.d_x.p, mass_uniform ? nullptr : G.d_mass.p,
+                                      first_mass, G.ns, h.box, 0.5);
+              }
+              check(cudaStreamSynchronize(G.compute_stream));
+#pragma omp barrier
+              if (g == 0) dist_pm.solve_and_gather(h.box, r_s, 1);
+#pragma omp barrier
+              if (G.ns > 0) {
+                dist_pm.interpolate_shift(g, G.d_x.p, G.ns, h.box, p.G, G.d_mesh_acc.p, nullptr,
+                                          1, 0.5, 0.5f, 1);
+              }
+              check(cudaStreamSynchronize(G.compute_stream));
+#pragma omp barrier
             }
-            grav_pm_cuda_solve_on_device(G.d_pm_density.p, G.d_pm_field.p, pm_side, h.box, r_s, G.compute_stream);
-            if (G.ns > 0) {
-              grav_pm_cuda_interpolate_buf(
-                  G.d_x.p, G.ns, G.d_pm_field.p, pm_side, h.box, p.G, G.d_mesh_acc.p, nullptr, G.compute_stream);
+          } else {
+            const int pm_passes = pm_cfg.interlace ? 2 : 1;
+            const float pm_scale = pm_cfg.interlace ? 0.5f : 1.0f;
+            for (int pm_pass = 0; pm_pass < pm_passes; ++pm_pass) {
+              const double pm_shift = pm_pass ? 0.5 : 0.0;
+              double4* fld_dst = pm_pass ? G.d_pm_field_shift.p : G.d_pm_field.p;
+              check(cudaMemsetAsync(G.d_pm_density.p, 0, pm_points * sizeof(double), G.compute_stream));
+              if (G.ns > 0) {
+                grav_pm_cuda_deposit_buf_shift(
+                    G.d_x.p, mass_uniform ? nullptr : G.d_mass.p, first_mass,
+                    G.ns, G.d_pm_density.p, pm_side, h.box, pm_shift, G.compute_stream);
+              }
+              grav_pm_cuda_solve_on_device(G.d_pm_density.p, fld_dst, pm_side, h.box, r_s, G.compute_stream);
+              if (G.ns > 0) {
+                grav_pm_cuda_interpolate_buf_shift(
+                    G.d_x.p, G.ns, fld_dst, pm_side, h.box, p.G, G.d_mesh_acc.p, nullptr,
+                    pm_shift, pm_scale, pm_pass, G.compute_stream);
+              }
             }
             check(cudaStreamSynchronize(G.compute_stream));
           }
@@ -3250,12 +3286,19 @@ inline int run_domain_3d_evolution(
             if (cfg.energy_log && (is_pm_step || is_final)) {
               check(cudaMemsetAsync(d_energy_accum[g], 0, 10 * sizeof(double), G.compute_stream));
               if (ns > 0) {
-                if (cfg.pm_dist_enabled) {
-                  dist_pm.interpolate(g, G.d_x.p, size_t(ns), h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p);
-                } else {
-                  grav_pm_cuda_interpolate_buf(
-                      G.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
-                      G.d_mesh_acc.p, G.d_pm_pot.p, G.compute_stream);
+                const int ipasses = pm_cfg.interlace ? 2 : 1;
+                const float iscale = pm_cfg.interlace ? 0.5f : 1.0f;
+                for (int pp = 0; pp < ipasses; ++pp) {
+                  const double pshift = pp ? 0.5 : 0.0;
+                  if (cfg.pm_dist_enabled) {
+                    dist_pm.interpolate_shift(g, G.d_x.p, size_t(ns), h.box, p.G,
+                                              G.d_mesh_acc.p, G.d_pm_pot.p, pp, pshift, iscale, pp);
+                  } else {
+                    grav_pm_cuda_interpolate_buf_shift(
+                        G.d_x.p, size_t(ns), pp ? G.d_pm_field_shift.p : G.d_pm_field.p,
+                        pm_side, h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p,
+                        pshift, iscale, pp, G.compute_stream);
+                  }
                 }
                 const double closing_pm_e =
                     (ti == 0) ? 0.0
@@ -3317,12 +3360,19 @@ inline int run_domain_3d_evolution(
 
             if (is_final || midpoint) {
               const double te0 = wall();
-              if (cfg.pm_dist_enabled) {
-                dist_pm.interpolate(g, G.d_x.p, size_t(ns), h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p);
-              } else {
-                grav_pm_cuda_interpolate_buf(
-                    G.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
-                    G.d_mesh_acc.p, G.d_pm_pot.p, G.compute_stream);
+              const int ipasses = pm_cfg.interlace ? 2 : 1;
+              const float iscale = pm_cfg.interlace ? 0.5f : 1.0f;
+              for (int pp = 0; pp < ipasses; ++pp) {
+                const double pshift = pp ? 0.5 : 0.0;
+                if (cfg.pm_dist_enabled) {
+                  dist_pm.interpolate_shift(g, G.d_x.p, size_t(ns), h.box, p.G,
+                                            G.d_mesh_acc.p, G.d_pm_pot.p, pp, pshift, iscale, pp);
+                } else {
+                  grav_pm_cuda_interpolate_buf_shift(
+                      G.d_x.p, size_t(ns), pp ? G.d_pm_field_shift.p : G.d_pm_field.p,
+                      pm_side, h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p,
+                      pshift, iscale, pp, G.compute_stream);
+                }
               }
               constexpr int exp_chunk = 1 << 20;
               const size_t chunk_n = size_t(std::min(ns, exp_chunk));

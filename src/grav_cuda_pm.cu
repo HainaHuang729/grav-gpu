@@ -1,5 +1,6 @@
 #include "config.h"
 #include "grav_cuda_pm.h"
+#include "grav_pm_config.cuh"
 
 // Read the split choice from SWIFT's source header in both standalone and
 // integrated builds, even when that header is not in the include chain yet.
@@ -40,7 +41,8 @@ void check(cufftResult status) {
 }
 
 __device__ int wrapped_index(int x, int n) {
-  return (x+n)%n;
+  const int r = x % n;
+  return r < 0 ? r + n : r;
 }
 __device__ size_t index(int x, int y, int z, int n) {
   return (size_t(wrapped_index(x,n))*n+wrapped_index(y,n))*n+wrapped_index(z,n);
@@ -94,7 +96,7 @@ __device__ double inverse_sinc(int mode, int n) {
 }
 
 __global__ void filter(cufftDoubleComplex* modes, int n, double box,
-                       double split, size_t count) {
+                       double split, int order, size_t count) {
   const size_t i=size_t(blockIdx.x)*blockDim.x+threadIdx.x;
   if (i>=count) return;
   if (i==0) {
@@ -114,10 +116,44 @@ __global__ void filter(cufftDoubleComplex* modes, int n, double box,
   const double window=arg/(sinh(arg)+FLT_MIN);
 #endif
   const double cic=inverse_sinc(kx,n)*inverse_sinc(ky,n)*inverse_sinc(kz,n);
-  const double square=cic*cic;
-  const double weight=(-1./(pi*box))*window/(k2+FLT_MIN)*square*square;
+  const double deconv=grav_pm_deconv_weight(cic, order);
+  const double weight=(-1./(pi*box))*window/(k2+FLT_MIN)*deconv;
   modes[i].x*=weight;
   modes[i].y*=weight;
+}
+
+__global__ void spectral_grad_axis_kernel(const cufftDoubleComplex* __restrict__ phi_modes,
+                                          cufftDoubleComplex* __restrict__ out_modes,
+                                          int n, double two_pi_over_box, int axis, size_t count) {
+  const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i >= count) return;
+  const int half = n / 2;
+  int kx = int((i / (half + 1)) / n);
+  int ky = int((i / (half + 1)) % n);
+  int kz = int(i % (half + 1));
+  if (kx > half) kx -= n;
+  if (ky > half) ky -= n;
+  int k_int = (axis == 0) ? kx : ((axis == 1) ? ky : kz);
+  if (k_int == half || k_int == -half || k_int == 0) {
+    out_modes[i] = {0.0, 0.0};
+    return;
+  }
+  const double k_phys = two_pi_over_box * double(k_int);
+  const cufftDoubleComplex z = phi_modes[i];
+  // -i * k * (re + i * im) = (+k * im, -k * re)
+  out_modes[i] = {k_phys * z.y, -k_phys * z.x};
+}
+
+__global__ void pack_field_comp_kernel(const double* __restrict__ src,
+                                       double4* __restrict__ field,
+                                       size_t points, int axis) {
+  const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i >= points) return;
+  const double v = src[i];
+  if (axis == 0) field[i].x = v;
+  else if (axis == 1) field[i].y = v;
+  else if (axis == 2) field[i].z = v;
+  else field[i].w = v;
 }
 
 __device__ double stencil(double lo2,double lo1,double hi1,double hi2) {
@@ -155,39 +191,70 @@ __global__ void interpolate(const void* particles, size_t stride_bytes, grav_pm_
   result[i]={{G*float(answer.x), G*float(answer.y), G*float(answer.z)},G*float(answer.w)};
 }
 
-__global__ void deposit_double3(const double3* x, const float* mass_or_null,
-                                float uniform_mass, size_t count,
-                                double* density, int n, double box) {
+template <int Order>
+__global__ void deposit_double3_t(const double3* x, const float* mass_or_null,
+                                  float uniform_mass, size_t count,
+                                  double* density, int n, double box, double shift) {
   const size_t i = size_t(blockIdx.x)*blockDim.x+threadIdx.x;
   if (i>=count) return;
   const double mp = double(mass_or_null ? mass_or_null[i] : uniform_mass);
   if (mp==0.) return;
   const double3 pos = x[i];
-  const CIC cic(pos.x,pos.y,pos.z,n,box);
-  for (int ix=0;ix<2;++ix) for (int iy=0;iy<2;++iy) for (int iz=0;iz<2;++iz) {
-    const size_t at = index(cic.cell[0]+ix,cic.cell[1]+iy,cic.cell[2]+iz,n);
-    atomicAdd(&density[at],mp*cic.weight[0][ix]*cic.weight[1][iy]*cic.weight[2][iz]);
+  const PmStencil<Order> st(pos.x, pos.y, pos.z, n, box, shift);
+  #pragma unroll
+  for (int ix=0; ix<Order; ++ix) {
+    const double mx = mp * st.weight[0][ix];
+    #pragma unroll
+    for (int iy=0; iy<Order; ++iy) {
+      const double mxy = mx * st.weight[1][iy];
+      #pragma unroll
+      for (int iz=0; iz<Order; ++iz) {
+        const size_t at = index(st.base[0]+ix, st.base[1]+iy, st.base[2]+iz, n);
+        atomicAdd(&density[at], mxy * st.weight[2][iz]);
+      }
+    }
   }
 }
 
-__global__ void interpolate_double3(const double3* x, size_t count, const double4* field,
-                                    int n, double box, float G,
-                                    float3* acc_out, float* pot_out_or_null) {
+template <int Order>
+__global__ void interpolate_double3_t(const double3* x, size_t count, const double4* field,
+                                      int n, double box, float G,
+                                      float3* acc_out, float* pot_out_or_null,
+                                      double shift, float acc_scale, int accumulate) {
   const size_t i=size_t(blockIdx.x)*blockDim.x+threadIdx.x;
   if (i>=count) return;
   const double3 pos = x[i];
-  const CIC cic(pos.x,pos.y,pos.z,n,box);
+  const PmStencil<Order> st(pos.x, pos.y, pos.z, n, box, shift);
   double4 answer{};
-  for (int ix=0;ix<2;++ix) for (int iy=0;iy<2;++iy) for (int iz=0;iz<2;++iz) {
-    const auto corner=field[index(cic.cell[0]+ix,cic.cell[1]+iy,cic.cell[2]+iz,n)];
-    const double w=cic.weight[0][ix]*cic.weight[1][iy]*cic.weight[2][iz];
-    answer.x+=w*corner.x;
-    answer.y+=w*corner.y;
-    answer.z+=w*corner.z;
-    answer.w+=w*corner.w;
+  #pragma unroll
+  for (int ix=0; ix<Order; ++ix) {
+    #pragma unroll
+    for (int iy=0; iy<Order; ++iy) {
+      const double wxy = st.weight[0][ix] * st.weight[1][iy];
+      #pragma unroll
+      for (int iz=0; iz<Order; ++iz) {
+        const auto corner=field[index(st.base[0]+ix, st.base[1]+iy, st.base[2]+iz, n)];
+        const double w = wxy * st.weight[2][iz];
+        answer.x+=w*corner.x;
+        answer.y+=w*corner.y;
+        answer.z+=w*corner.z;
+        answer.w+=w*corner.w;
+      }
+    }
   }
-  acc_out[i]={G*float(answer.x), G*float(answer.y), G*float(answer.z)};
-  if (pot_out_or_null) pot_out_or_null[i]=G*float(answer.w);
+  const float s = G * acc_scale;
+  const float ax = s * float(answer.x);
+  const float ay = s * float(answer.y);
+  const float az = s * float(answer.z);
+  if (accumulate) {
+    acc_out[i].x += ax;
+    acc_out[i].y += ay;
+    acc_out[i].z += az;
+    if (pot_out_or_null) pot_out_or_null[i] += s * float(answer.w);
+  } else {
+    acc_out[i] = {ax, ay, az};
+    if (pot_out_or_null) pot_out_or_null[i] = s * float(answer.w);
+  }
 }
 
 struct Workspace {
@@ -244,6 +311,8 @@ Workspace& workspace() {
 
 struct SolveWorkspace {
   cufftDoubleComplex* modes=nullptr;
+  cufftDoubleComplex* grad_modes=nullptr;
+  double* grad_real=nullptr;
   cufftHandle forward{}, reverse{};
   int n=0;
   int dev=-1;
@@ -255,13 +324,17 @@ struct SolveWorkspace {
     cufftDestroy(forward);
     cufftDestroy(reverse);
     cudaFree(modes);
+    if (grad_modes) cudaFree(grad_modes);
+    if (grad_real) cudaFree(grad_real);
     modes=nullptr;
+    grad_modes=nullptr;
+    grad_real=nullptr;
     n=0;
     dev=-1;
     if (prev>=0 && cudaGetDevice(&prev)==cudaSuccess) cudaSetDevice(prev);
   }
   ~SolveWorkspace() { clear(); }
-  void prepare(int side, cudaStream_t stream) {
+  void prepare(int side, cudaStream_t stream, bool need_spectral) {
     int cur=0;
     check(cudaGetDevice(&cur));
     if (n!=side || dev!=cur) {
@@ -271,6 +344,10 @@ struct SolveWorkspace {
       check(cudaMalloc(&modes, size_t(n)*n*(n/2+1)*sizeof(*modes)));
       check(cufftPlan3d(&forward,n,n,n,CUFFT_D2Z));
       check(cufftPlan3d(&reverse,n,n,n,CUFFT_Z2D));
+    }
+    if (need_spectral && !grad_modes) {
+      check(cudaMalloc(&grad_modes, size_t(n)*n*(n/2+1)*sizeof(*grad_modes)));
+      check(cudaMalloc(&grad_real, size_t(n)*n*n*sizeof(*grad_real)));
     }
     check(cufftSetStream(forward,stream));
     check(cufftSetStream(reverse,stream));
@@ -310,9 +387,10 @@ void enqueue_deposit(Workspace& w,const void* particles,size_t stride_bytes,size
 }
 
 void enqueue_transform(Workspace& w,int side,double box,double split,cudaStream_t stream) {
+  const auto cfg = grav_pm_get_config();
   const size_t modes=size_t(side)*side*(side/2+1);
   check(cufftExecD2Z(w.forward,w.potential,w.modes));
-  filter<<<blocks(modes),block_size,0,stream>>>(w.modes,side,box,split,modes);
+  filter<<<blocks(modes),block_size,0,stream>>>(w.modes,side,box,split,cfg.order,modes);
   check(cufftExecZ2D(w.reverse,w.modes,w.potential));
 }
 
@@ -388,20 +466,13 @@ extern "C" void grav_pm_cuda_deposit_double3(const void* d_x_double3,
                                               int side,double box,void* handle) {
   if (!count) return;
   auto& w=workspace();
-  const auto stream=static_cast<cudaStream_t>(handle);
-  deposit_double3<<<blocks(count),block_size,0,stream>>>(
-      static_cast<const double3*>(d_x_double3),d_mass_or_null,uniform_mass,count,
-      w.potential,side,box);
-  check(cudaGetLastError());
+  grav_pm_cuda_deposit_buf_shift(d_x_double3, d_mass_or_null, uniform_mass, count,
+                                 w.potential, side, box, 0.0, handle);
 }
 
 extern "C" void grav_pm_cuda_solve(int side,double box,double split,void* handle) {
   auto& w=workspace();
-  const auto stream=static_cast<cudaStream_t>(handle);
-  enqueue_transform(w,side,box,split,stream);
-  const size_t points=size_t(side)*side*side;
-  differentiate<<<blocks(points),block_size,0,stream>>>(w.potential,w.field,side,side/box);
-  check(cudaGetLastError());
+  grav_pm_cuda_solve_on_device(w.potential, w.field, side, box, split, handle);
 }
 
 extern "C" void grav_pm_cuda_interpolate_double3(const void* d_x_double3,size_t count,
@@ -410,11 +481,8 @@ extern "C" void grav_pm_cuda_interpolate_double3(const void* d_x_double3,size_t 
                                                   void* handle) {
   if (!count) return;
   auto& w=workspace();
-  const auto stream=static_cast<cudaStream_t>(handle);
-  interpolate_double3<<<blocks(count),block_size,0,stream>>>(
-      static_cast<const double3*>(d_x_double3),count,w.field,side,box,grav_G,
-      static_cast<float3*>(d_acc_float3),d_pot_or_null);
-  check(cudaGetLastError());
+  grav_pm_cuda_interpolate_buf_shift(d_x_double3, count, w.field, side, box, grav_G,
+                                     d_acc_float3, d_pot_or_null, 0.0, 1.0f, 0, handle);
 }
 
 extern "C" void grav_pm_cuda_host(const grav_pm_particle* particles, size_t count,
@@ -433,32 +501,98 @@ extern "C" void grav_pm_cuda_host(const grav_pm_particle* particles, size_t coun
   });
 }
 
+extern "C" void grav_pm_cuda_set_config(int order, int interlace, int spectral_grad) {
+  grav_pm_set_runtime_config(order, interlace, spectral_grad);
+}
+
+extern "C" void grav_pm_cuda_deposit_buf_shift(const void* d_x_double3,
+                                                const float* d_mass_or_null,
+                                                float uniform_mass, size_t count,
+                                                double* d_density, int side,
+                                                double box, double shift, void* handle) {
+  if (!count) return;
+  const auto stream=static_cast<cudaStream_t>(handle);
+  const auto cfg = grav_pm_get_config();
+  if (cfg.order == 3) {
+    deposit_double3_t<3><<<blocks(count),block_size,0,stream>>>(
+        static_cast<const double3*>(d_x_double3),d_mass_or_null,uniform_mass,
+        count,d_density,side,box,shift);
+  } else if (cfg.order == 4) {
+    deposit_double3_t<4><<<blocks(count),block_size,0,stream>>>(
+        static_cast<const double3*>(d_x_double3),d_mass_or_null,uniform_mass,
+        count,d_density,side,box,shift);
+  } else {
+    deposit_double3_t<2><<<blocks(count),block_size,0,stream>>>(
+        static_cast<const double3*>(d_x_double3),d_mass_or_null,uniform_mass,
+        count,d_density,side,box,shift);
+  }
+  check(cudaGetLastError());
+}
+
 extern "C" void grav_pm_cuda_deposit_buf(const void* d_x_double3,
                                           const float* d_mass_or_null,
                                           float uniform_mass, size_t count,
                                           double* d_density, int side,
                                           double box, void* handle) {
-  if (!count) return;
-  const auto stream=static_cast<cudaStream_t>(handle);
-  deposit_double3<<<blocks(count),block_size,0,stream>>>(
-      static_cast<const double3*>(d_x_double3),d_mass_or_null,uniform_mass,
-      count,d_density,side,box);
-  check(cudaGetLastError());
+  grav_pm_cuda_deposit_buf_shift(d_x_double3, d_mass_or_null, uniform_mass, count,
+                                 d_density, side, box, 0.0, handle);
 }
 
 extern "C" void grav_pm_cuda_solve_on_device(double* d_density, void* d_field_double4,
                                               int side, double box, double split,
                                               void* handle) {
   const auto stream=static_cast<cudaStream_t>(handle);
+  const auto cfg = grav_pm_get_config();
   auto& sw=solve_workspace();
-  sw.prepare(side,stream);
+  sw.prepare(side,stream,cfg.spectral_grad != 0);
   const size_t modes_cnt=size_t(side)*side*(side/2+1);
   const size_t points=size_t(side)*side*side;
   check(cufftExecD2Z(sw.forward,d_density,sw.modes));
-  filter<<<blocks(modes_cnt),block_size,0,stream>>>(sw.modes,side,box,split,modes_cnt);
-  check(cufftExecZ2D(sw.reverse,sw.modes,d_density));
-  differentiate<<<blocks(points),block_size,0,stream>>>(
-      d_density,static_cast<double4*>(d_field_double4),side,side/box);
+  filter<<<blocks(modes_cnt),block_size,0,stream>>>(sw.modes,side,box,split,cfg.order,modes_cnt);
+  if (cfg.spectral_grad) {
+    auto* field = static_cast<double4*>(d_field_double4);
+    check(cufftExecZ2D(sw.reverse,sw.modes,d_density));
+    pack_field_comp_kernel<<<blocks(points),block_size,0,stream>>>(d_density,field,points,3);
+    const double two_pi_over_box = 2.0 * pi / box;
+    for (int axis = 0; axis < 3; ++axis) {
+      spectral_grad_axis_kernel<<<blocks(modes_cnt),block_size,0,stream>>>(
+          sw.modes, sw.grad_modes, side, two_pi_over_box, axis, modes_cnt);
+      check(cufftExecZ2D(sw.reverse,sw.grad_modes,sw.grad_real));
+      pack_field_comp_kernel<<<blocks(points),block_size,0,stream>>>(sw.grad_real,field,points,axis);
+    }
+  } else {
+    check(cufftExecZ2D(sw.reverse,sw.modes,d_density));
+    differentiate<<<blocks(points),block_size,0,stream>>>(
+        d_density,static_cast<double4*>(d_field_double4),side,side/box);
+  }
+  check(cudaGetLastError());
+}
+
+extern "C" void grav_pm_cuda_interpolate_buf_shift(const void* d_x_double3, size_t count,
+                                                    const void* d_field_double4, int side,
+                                                    double box, float grav_G,
+                                                    void* d_acc_float3, float* d_pot_or_null,
+                                                    double shift, float acc_scale,
+                                                    int accumulate, void* handle) {
+  if (!count) return;
+  const auto stream=static_cast<cudaStream_t>(handle);
+  const auto cfg = grav_pm_get_config();
+  if (cfg.order == 3) {
+    interpolate_double3_t<3><<<blocks(count),block_size,0,stream>>>(
+        static_cast<const double3*>(d_x_double3),count,
+        static_cast<const double4*>(d_field_double4),side,box,grav_G,
+        static_cast<float3*>(d_acc_float3),d_pot_or_null,shift,acc_scale,accumulate);
+  } else if (cfg.order == 4) {
+    interpolate_double3_t<4><<<blocks(count),block_size,0,stream>>>(
+        static_cast<const double3*>(d_x_double3),count,
+        static_cast<const double4*>(d_field_double4),side,box,grav_G,
+        static_cast<float3*>(d_acc_float3),d_pot_or_null,shift,acc_scale,accumulate);
+  } else {
+    interpolate_double3_t<2><<<blocks(count),block_size,0,stream>>>(
+        static_cast<const double3*>(d_x_double3),count,
+        static_cast<const double4*>(d_field_double4),side,box,grav_G,
+        static_cast<float3*>(d_acc_float3),d_pot_or_null,shift,acc_scale,accumulate);
+  }
   check(cudaGetLastError());
 }
 
@@ -467,11 +601,6 @@ extern "C" void grav_pm_cuda_interpolate_buf(const void* d_x_double3, size_t cou
                                               double box, float grav_G,
                                               void* d_acc_float3, float* d_pot_or_null,
                                               void* handle) {
-  if (!count) return;
-  const auto stream=static_cast<cudaStream_t>(handle);
-  interpolate_double3<<<blocks(count),block_size,0,stream>>>(
-      static_cast<const double3*>(d_x_double3),count,
-      static_cast<const double4*>(d_field_double4),side,box,grav_G,
-      static_cast<float3*>(d_acc_float3),d_pot_or_null);
-  check(cudaGetLastError());
+  grav_pm_cuda_interpolate_buf_shift(d_x_double3, count, d_field_double4, side, box, grav_G,
+                                     d_acc_float3, d_pot_or_null, 0.0, 1.0f, 0, handle);
 }

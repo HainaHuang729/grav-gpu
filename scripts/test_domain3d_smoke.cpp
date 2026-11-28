@@ -1,4 +1,5 @@
 #include "grav_domain_3d.h"
+#include "grav_pm_config.cuh"
 
 #include <array>
 #include <cassert>
@@ -59,6 +60,17 @@ int main() {
     assert(sr.intra_node_ghost_cells + sr.inter_node_ghost_cells == uint64_t(plan.stats.ghost_total));
     assert(sc.inter_node_ghost_cells < sr.inter_node_ghost_cells);
     assert(sc.inter_node_ghost_parts < sr.inter_node_ghost_parts);
+  }
+  // P1 high-order PM halo-padding check (CIC [-1,+1] vs PCS+interlace [-2,+3])
+  {
+    assert(grav_pm_x_halo_lo(2, 0) == 1 && grav_pm_x_halo_hi(2, 0) == 1);
+    assert(grav_pm_x_halo_lo(3, 0) == 2 && grav_pm_x_halo_hi(3, 0) == 2);
+    assert(grav_pm_x_halo_lo(4, 1) == 2 && grav_pm_x_halo_hi(4, 1) == 3);
+    const Domain3DPlan p_cic = build_domain_3d_plan(counts, weights, 4, DomainMode::Hilbert3D, 128, nullptr, 1, 1);
+    const Domain3DPlan p_pcs = build_domain_3d_plan(counts, weights, 4, DomainMode::Hilbert3D, 128, nullptr, 2, 3);
+    for (int g = 0; g < 4; ++g) {
+      assert(p_pcs.gpu_x_planes[g].size() >= p_cic.gpu_x_planes[g].size());
+    }
   }
   std::cout << "DOMAIN3D_SMOKE_PASSED\n";
   return 0;

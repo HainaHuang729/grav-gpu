@@ -160,10 +160,21 @@ inline int run_domain_3d_mpi_evolution(
   const int leaf_limit = cfg.leaf_limit;
   const double inv_cell_w = double(N_TOP) / h.box;
 
+  const GravPmConfig pm_cfg = grav_pm_get_config();
+  const int pm_halo_lo = grav_pm_x_halo_lo(pm_cfg.order, pm_cfg.interlace);
+  const int pm_halo_hi = grav_pm_x_halo_hi(pm_cfg.order, pm_cfg.interlace);
+  if (my_rank == 0) {
+    std::printf("PM_CONFIG order=%d interlace=%d grad=%s asmth=%.4f halo=[-%d,+%d]\n",
+                pm_cfg.order, pm_cfg.interlace, pm_cfg.spectral_grad ? "ik" : "fd4",
+                pm_cfg.asmth, pm_halo_lo, pm_halo_hi);
+    std::fflush(stdout);
+  }
+
   std::array<double, N_TOP_CELLS> init_weights{};
   for (int c = 0; c < N_TOP_CELLS; ++c) init_weights[c] = double(cfg.init_cell_counts[c]);
   Domain3DPlan plan = build_domain_3d_plan(
-      cfg.init_cell_counts, init_weights, num_ranks, cfg.domain_mode, pm_side, nullptr);
+      cfg.init_cell_counts, init_weights, num_ranks, cfg.domain_mode, pm_side, nullptr,
+      pm_halo_lo, pm_halo_hi);
   MultiNodeCommStats mstats = compute_multinode_comm_stats(plan, mpi.rank_to_node, &cfg.init_cell_counts);
 
   // Pass 2: each MPI rank streams input.bin and retains ONLY particles in its owned cells
@@ -287,6 +298,7 @@ inline int run_domain_3d_mpi_evolution(
   if (!cfg.pm_dist_enabled && num_ranks == 1) {
     G.d_pm_density.alloc(pm_points, G.device_bytes);
     G.d_pm_field.alloc(pm_points, G.device_bytes);
+    if (pm_cfg.interlace) G.d_pm_field_shift.alloc(pm_points, G.device_bytes);
   }
   G.d_scan_tmp.alloc(scan_grid_max, G.device_bytes);
   G.h_scan.resize(scan_grid_max);
@@ -357,7 +369,7 @@ inline int run_domain_3d_mpi_evolution(
       : float(h.plummer_softening * kernel_gravity_softening_plummer_equivalent);
   const double rho_crit0 = 3.0 * cfg.cosmo_h0 * cfg.cosmo_h0 / (8.0 * acos(-1.0) * double(cfg.grav_G));
   const double d_dm = cbrt(cfg.min_mass / (cfg.cosmo_ocdm * rho_crit0));
-  const double r_s = 1.25 * h.box / double(pm_side);
+  const double r_s = pm_cfg.asmth * h.box / double(pm_side);
 
   Physics p{knots[0], log_span,
       float(h.box), float(r_s), float(4.5 * r_s), cfg.grav_G,
@@ -966,7 +978,8 @@ inline int run_domain_3d_mpi_evolution(
         steps_since_rebal = 0;
         const double cur_imb = detail::compute_load_imbalance(cur_w, plan.cell_owner, num_ranks);
         Domain3DPlan cand_plan = build_domain_3d_plan(
-            cur_cnt, cur_w, num_ranks, cfg.domain_mode, pm_side, nullptr);
+            cur_cnt, cur_w, num_ranks, cfg.domain_mode, pm_side, nullptr,
+            pm_halo_lo, pm_halo_hi);
         const double new_imb = cand_plan.stats.w_imb;
         const double gain = (cur_imb - new_imb) / std::max(cur_imb, 1e-12);
         if (gain >= cfg.rebalance_min_gain) {
@@ -1075,30 +1088,39 @@ inline int run_domain_3d_mpi_evolution(
       // ================= STEP B: Distributed MPI PM =================
       if (is_pm_step) {
         const double t_pm0 = wall();
-        if (use_mpi_pm) {
-          mpi_pm.begin_deposit();
-          if (G.ns > 0) {
-            mpi_pm.deposit(G.d_x.p, mass_uniform ? nullptr : G.d_mass.p, first_mass, G.ns, h.box);
+        const int pm_passes = pm_cfg.interlace ? 2 : 1;
+        const float pm_scale = pm_cfg.interlace ? 0.5f : 1.0f;
+        for (int pm_pass = 0; pm_pass < pm_passes; ++pm_pass) {
+          const double pm_shift = pm_pass ? 0.5 : 0.0;
+          if (use_mpi_pm) {
+            mpi_pm.begin_deposit();
+            if (G.ns > 0) {
+              mpi_pm.deposit_shift(G.d_x.p, mass_uniform ? nullptr : G.d_mass.p,
+                                   first_mass, G.ns, h.box, pm_shift);
+            }
+            mpi_pm.solve_and_gather(h.box, r_s, pm_pass);
+            pm_mpi_acc_ms += mpi_pm.last_comm_ms();
+            if (G.ns > 0) {
+              mpi_pm.interpolate_shift(G.d_x.p, G.ns, h.box, p.G, G.d_mesh_acc.p, nullptr,
+                                       pm_pass, pm_shift, pm_scale, pm_pass);
+            }
+            check(cudaStreamSynchronize(G.compute_stream));
+          } else {
+            double4* fld_dst = pm_pass ? G.d_pm_field_shift.p : G.d_pm_field.p;
+            check(cudaMemsetAsync(G.d_pm_density.p, 0, pm_points * sizeof(double), G.compute_stream));
+            if (G.ns > 0) {
+              grav_pm_cuda_deposit_buf_shift(
+                  G.d_x.p, mass_uniform ? nullptr : G.d_mass.p, first_mass,
+                  G.ns, G.d_pm_density.p, pm_side, h.box, pm_shift, G.compute_stream);
+            }
+            grav_pm_cuda_solve_on_device(G.d_pm_density.p, fld_dst, pm_side, h.box, r_s, G.compute_stream);
+            if (G.ns > 0) {
+              grav_pm_cuda_interpolate_buf_shift(
+                  G.d_x.p, G.ns, fld_dst, pm_side, h.box, p.G, G.d_mesh_acc.p, nullptr,
+                  pm_shift, pm_scale, pm_pass, G.compute_stream);
+            }
+            check(cudaStreamSynchronize(G.compute_stream));
           }
-          mpi_pm.solve_and_gather(h.box, r_s);
-          pm_mpi_acc_ms += mpi_pm.last_comm_ms();
-          if (G.ns > 0) {
-            mpi_pm.interpolate(G.d_x.p, G.ns, h.box, p.G, G.d_mesh_acc.p, nullptr);
-          }
-          check(cudaStreamSynchronize(G.compute_stream));
-        } else {
-          check(cudaMemsetAsync(G.d_pm_density.p, 0, pm_points * sizeof(double), G.compute_stream));
-          if (G.ns > 0) {
-            grav_pm_cuda_deposit_buf(
-                G.d_x.p, mass_uniform ? nullptr : G.d_mass.p, first_mass,
-                G.ns, G.d_pm_density.p, pm_side, h.box, G.compute_stream);
-          }
-          grav_pm_cuda_solve_on_device(G.d_pm_density.p, G.d_pm_field.p, pm_side, h.box, r_s, G.compute_stream);
-          if (G.ns > 0) {
-            grav_pm_cuda_interpolate_buf(
-                G.d_x.p, G.ns, G.d_pm_field.p, pm_side, h.box, p.G, G.d_mesh_acc.p, nullptr, G.compute_stream);
-          }
-          check(cudaStreamSynchronize(G.compute_stream));
         }
         pm_ms = (wall() - t_pm0) * 1000.0;
       }
@@ -1705,12 +1727,19 @@ inline int run_domain_3d_mpi_evolution(
         std::array<double, 10> loc_e{}, glb_e{};
         check(cudaMemsetAsync(d_energy_accum, 0, 10 * sizeof(double), G.compute_stream));
         if (ns > 0) {
-          if (use_mpi_pm) {
-            mpi_pm.interpolate(G.d_x.p, size_t(ns), h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p);
-          } else {
-            grav_pm_cuda_interpolate_buf(
-                G.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
-                G.d_mesh_acc.p, G.d_pm_pot.p, G.compute_stream);
+          const int ipasses = pm_cfg.interlace ? 2 : 1;
+          const float iscale = pm_cfg.interlace ? 0.5f : 1.0f;
+          for (int pp = 0; pp < ipasses; ++pp) {
+            const double pshift = pp ? 0.5 : 0.0;
+            if (use_mpi_pm) {
+              mpi_pm.interpolate_shift(G.d_x.p, size_t(ns), h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p,
+                                       pp, pshift, iscale, pp);
+            } else {
+              grav_pm_cuda_interpolate_buf_shift(
+                  G.d_x.p, size_t(ns), pp ? G.d_pm_field_shift.p : G.d_pm_field.p,
+                  pm_side, h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p,
+                  pshift, iscale, pp, G.compute_stream);
+            }
           }
           const double closing_pm_e =
               (ti == 0) ? 0.0
@@ -1917,12 +1946,19 @@ inline int run_domain_3d_mpi_evolution(
       } else {
         const double te0 = wall();
         if (ns > 0) {
-          if (use_mpi_pm) {
-            mpi_pm.interpolate(G.d_x.p, size_t(ns), h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p);
-          } else {
-            grav_pm_cuda_interpolate_buf(
-                G.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
-                G.d_mesh_acc.p, G.d_pm_pot.p, G.compute_stream);
+          const int ipasses = pm_cfg.interlace ? 2 : 1;
+          const float iscale = pm_cfg.interlace ? 0.5f : 1.0f;
+          for (int pp = 0; pp < ipasses; ++pp) {
+            const double pshift = pp ? 0.5 : 0.0;
+            if (use_mpi_pm) {
+              mpi_pm.interpolate_shift(G.d_x.p, size_t(ns), h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p,
+                                       pp, pshift, iscale, pp);
+            } else {
+              grav_pm_cuda_interpolate_buf_shift(
+                  G.d_x.p, size_t(ns), pp ? G.d_pm_field_shift.p : G.d_pm_field.p,
+                  pm_side, h.box, p.G, G.d_mesh_acc.p, G.d_pm_pot.p,
+                  pshift, iscale, pp, G.compute_stream);
+            }
           }
         }
         std::vector<double3> hx(ns);

@@ -34,7 +34,7 @@ KERNEL_REQ_SRCS := \
 
 NVCC_COMMON := -O3 -std=c++17 -arch=$(CUDA_ARCH) --fmad=true -ccbin=$(CXX)
 
-.PHONY: help all standalone fof pm pm-mpi cic engine mpi-engine test-domain3d test-fof test-mpi-pm smoke clean check-kernels
+.PHONY: help all standalone fof pm pm-mpi cic engine mpi-engine test-domain3d test-fof test-mpi-pm test-pm-precision test-ic smoke clean check-kernels
 
 help:
 	@echo "Targets:"
@@ -66,13 +66,13 @@ pm: check-kernels $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_dist.o
 
 pm-mpi: check-kernels $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_mpi.o
 
-$(BUILD_DIR)/grav_cuda_pm.o: src/grav_cuda_pm.cu src/grav_cuda_pm.h | $(BUILD_DIR)
+$(BUILD_DIR)/grav_cuda_pm.o: src/grav_cuda_pm.cu src/grav_cuda_pm.h src/grav_pm_config.cuh | $(BUILD_DIR)
 	$(NVCC) $(NVCC_COMMON) -Xcompiler -fPIC -c -Isrc -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -I$(MATHLIB_INC) src/grav_cuda_pm.cu -o $@
 
-$(BUILD_DIR)/grav_cuda_pm_dist.o: src/grav_cuda_pm_dist.cu src/grav_cuda_pm_dist.h | $(BUILD_DIR)
+$(BUILD_DIR)/grav_cuda_pm_dist.o: src/grav_cuda_pm_dist.cu src/grav_cuda_pm_dist.h src/grav_pm_config.cuh | $(BUILD_DIR)
 	$(NVCC) $(NVCC_COMMON) -Xcompiler -fPIC -c -Isrc -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -I$(MATHLIB_INC) src/grav_cuda_pm_dist.cu -o $@
 
-$(BUILD_DIR)/grav_cuda_pm_mpi.o: src/grav_cuda_pm_mpi.cu src/grav_cuda_pm_mpi.h src/grav_mpi_comm.h | $(BUILD_DIR)
+$(BUILD_DIR)/grav_cuda_pm_mpi.o: src/grav_cuda_pm_mpi.cu src/grav_cuda_pm_mpi.h src/grav_mpi_comm.h src/grav_pm_config.cuh | $(BUILD_DIR)
 	$(NVCC) -O3 -std=c++17 -arch=$(CUDA_ARCH) --fmad=true -ccbin=$(MPICXX) -Xcompiler -fPIC -c -Isrc -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -I$(MATHLIB_INC) src/grav_cuda_pm_mpi.cu -o $@
 
 cic: $(BUILD_DIR)/libcic_deposit.so
@@ -95,6 +95,18 @@ $(BUILD_DIR)/test_mpi_pm: check-kernels scripts/test_mpi_pm.cu $(BUILD_DIR)/grav
 test-mpi-pm: $(BUILD_DIR)/test_mpi_pm
 	LD_LIBRARY_PATH="$(MATHLIB_LIB):$(CUDA_HOME)/lib64:$${LD_LIBRARY_PATH:-}" \
 		mpirun -np 2 ./$(BUILD_DIR)/test_mpi_pm
+
+$(BUILD_DIR)/test_pm_precision: check-kernels scripts/test_pm_precision.cu $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_dist.o src/grav_pm_config.cuh | $(BUILD_DIR)
+	$(NVCC) $(NVCC_COMMON) -Isrc -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -I$(MATHLIB_INC) \
+		-L$(MATHLIB_LIB) scripts/test_pm_precision.cu $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_dist.o \
+		-lcufft -o $@
+
+test-pm-precision: $(BUILD_DIR)/test_pm_precision
+	LD_LIBRARY_PATH="$(MATHLIB_LIB):$(CUDA_HOME)/lib64:$${LD_LIBRARY_PATH:-}" \
+		./$(BUILD_DIR)/test_pm_precision
+
+test-ic:
+	$(PYTHON) scripts/test_ic_adapters.py
 
 test-fof: fof
 	LD_LIBRARY_PATH="$(CUDA_HOME)/lib64:$(MATHLIB_LIB):$${LD_LIBRARY_PATH:-}" \

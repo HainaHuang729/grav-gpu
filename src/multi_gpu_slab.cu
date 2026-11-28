@@ -28,6 +28,7 @@
 
 #include "grav_cuda_pm.h"
 #include "grav_cuda_pm_dist.h"
+#include "grav_pm_config.cuh"
 #include "grav_cuda_fof.h"
 #include "grav_domain_3d.h"
 #ifdef GRAV_ENABLE_MPI
@@ -3030,7 +3031,7 @@ struct GpuCtx {
   DevPtr<Meta> d_stats;
   DevPtr<double> d_kick_finish, d_kick_begin;
   DevPtr<double> d_pm_density;
-  DevPtr<double4> d_pm_field;
+  DevPtr<double4> d_pm_field, d_pm_field_shift;
   DevPtr<ScanPartial> d_scan_tmp;
   DevPtr<DevMigrant> d_mig_out, d_mig_in;
   DevPtr<unsigned char> d_tail_flags;
@@ -3276,6 +3277,7 @@ struct GpuCtx {
     d_kick_begin.free(device_bytes);
     d_pm_density.free(device_bytes);
     d_pm_field.free(device_bytes);
+    d_pm_field_shift.free(device_bytes);
     d_scan_tmp.free(device_bytes);
     d_mig_out.free(device_bytes);
     d_mig_in.free(device_bytes);
@@ -4413,6 +4415,9 @@ int main(int argc, char** argv) {
       if (periodic && !pm_dist_enabled) {
         G.d_pm_density.alloc(pm_points, G.device_bytes);
         G.d_pm_field.alloc(pm_points, G.device_bytes);
+        if (grav_pm_get_config().interlace) {
+          G.d_pm_field_shift.alloc(pm_points, G.device_bytes);
+        }
       }
       G.d_scan_tmp.alloc(scan_grid_max, G.device_bytes);
       G.h_scan.resize(scan_grid_max);
@@ -4474,6 +4479,16 @@ int main(int argc, char** argv) {
     check(cudaSetDevice(0));
     const double load_s = wall() - import_start;
 
+    const GravPmConfig pm_cfg = grav_pm_get_config();
+    const int pm_halo_lo = grav_pm_x_halo_lo(pm_cfg.order, pm_cfg.interlace);
+    const int pm_halo_hi = grav_pm_x_halo_hi(pm_cfg.order, pm_cfg.interlace);
+    if (periodic) {
+      std::printf("PM_CONFIG order=%d interlace=%d grad=%s asmth=%.4f halo=[-%d,+%d]\n",
+                  pm_cfg.order, pm_cfg.interlace, pm_cfg.spectral_grad ? "ik" : "fd4",
+                  pm_cfg.asmth, pm_halo_lo, pm_halo_hi);
+      std::fflush(stdout);
+    }
+
     GravDistPm dist_pm;
     if (pm_dist_enabled) {
       std::vector<int> devs(num_gpus);
@@ -4484,8 +4499,8 @@ int main(int argc, char** argv) {
         streams[g] = gpus[g].compute_stream;
         for (int ls = 0; ls < gpus[g].slabs_per_gpu; ++ls) {
           const int s = owned_slab(g, ls);
-          const int px_lo = int(std::floor(double(s) * pm_side / double(num_slabs))) - 1;
-          const int px_hi = int(std::ceil(double(s + 1) * pm_side / double(num_slabs))) + 1;
+          const int px_lo = int(std::floor(double(s) * pm_side / double(num_slabs))) - pm_halo_lo;
+          const int px_hi = int(std::ceil(double(s + 1) * pm_side / double(num_slabs))) + pm_halo_hi;
           for (int px = px_lo; px <= px_hi; ++px) {
             int gx = px % pm_side;
             if (gx < 0) gx += pm_side;
@@ -4510,7 +4525,7 @@ int main(int argc, char** argv) {
         : float(h.plummer_softening * kernel_gravity_softening_plummer_equivalent);
     const double rho_crit0 = 3.0 * cosmo_h0 * cosmo_h0 / (8.0 * acos(-1.0) * double(grav_G));
     const double d_dm = cbrt(min_mass / (cosmo_ocdm * rho_crit0));
-    const double r_s = 1.25 * h.box / double(pm_side);
+    const double r_s = pm_cfg.asmth * h.box / double(pm_side);
     const double3 ext_c_perm = permute_in(ext_c_orig, slab_axis);
     Physics p{knots[0], log_span,
         float(h.box), periodic ? float(r_s) : 1e30f, periodic ? float(4.5 * r_s) : 1e30f, grav_G,
@@ -5436,95 +5451,103 @@ int main(int argc, char** argv) {
         // ================= STEP B: Multi-GPU Resident PM =================
         if (periodic && is_pm_step) {
           const double t_pm0 = wall();
-          if (pm_dist_enabled) {
-            dist_pm.begin_deposit(g);
-            for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
-              const auto& S = G.slabs[ls];
-              if (S.ns > 0) {
-                dist_pm.deposit(g, S.d_x.p, mass_uniform ? nullptr : S.d_mass.p,
-                                first_mass, S.ns, h.box);
+          const int pm_passes = pm_cfg.interlace ? 2 : 1;
+          const float pm_scale = pm_cfg.interlace ? 0.5f : 1.0f;
+          for (int pm_pass = 0; pm_pass < pm_passes; ++pm_pass) {
+            const double pm_shift = pm_pass ? 0.5 : 0.0;
+            if (pm_dist_enabled) {
+              dist_pm.begin_deposit(g);
+              for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
+                const auto& S = G.slabs[ls];
+                if (S.ns > 0) {
+                  dist_pm.deposit_shift(g, S.d_x.p, mass_uniform ? nullptr : S.d_mass.p,
+                                        first_mass, S.ns, h.box, pm_shift);
+                }
               }
-            }
-            check(cudaStreamSynchronize(G.compute_stream));
+              check(cudaStreamSynchronize(G.compute_stream));
 #pragma omp barrier
-            if (g == 0) {
-              dist_pm.solve_and_gather(h.box, r_s);
-            }
+              if (g == 0) {
+                dist_pm.solve_and_gather(h.box, r_s, pm_pass);
+              }
 #pragma omp barrier
-            for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
-              const auto& S = G.slabs[ls];
-              if (S.ns > 0) {
-                dist_pm.interpolate(g, S.d_x.p, S.ns, h.box, p.G,
-                                    S.d_mesh_acc.p, nullptr);
+              for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
+                const auto& S = G.slabs[ls];
+                if (S.ns > 0) {
+                  dist_pm.interpolate_shift(g, S.d_x.p, S.ns, h.box, p.G,
+                                            S.d_mesh_acc.p, nullptr,
+                                            pm_pass, pm_shift, pm_scale, pm_pass);
+                }
               }
-            }
-            check(cudaStreamSynchronize(G.compute_stream));
+              check(cudaStreamSynchronize(G.compute_stream));
 #pragma omp barrier
-          } else if (num_gpus == 1) {
-            check(cudaMemsetAsync(G.d_pm_density.p, 0, pm_points * sizeof(double), G.compute_stream));
-            for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
-              const auto& S = G.slabs[ls];
-              if (S.ns > 0) {
-                grav_pm_cuda_deposit_buf(
-                    S.d_x.p, mass_uniform ? nullptr : S.d_mass.p, first_mass,
-                    S.ns, G.d_pm_density.p, pm_side, h.box, G.compute_stream);
+            } else if (num_gpus == 1) {
+              double4* fld_dst = pm_pass ? G.d_pm_field_shift.p : G.d_pm_field.p;
+              check(cudaMemsetAsync(G.d_pm_density.p, 0, pm_points * sizeof(double), G.compute_stream));
+              for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
+                const auto& S = G.slabs[ls];
+                if (S.ns > 0) {
+                  grav_pm_cuda_deposit_buf_shift(
+                      S.d_x.p, mass_uniform ? nullptr : S.d_mass.p, first_mass,
+                      S.ns, G.d_pm_density.p, pm_side, h.box, pm_shift, G.compute_stream);
+                }
               }
-            }
-            grav_pm_cuda_solve_on_device(G.d_pm_density.p, G.d_pm_field.p, pm_side, h.box, r_s, G.compute_stream);
-            for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
-              const auto& S = G.slabs[ls];
-              if (S.ns > 0) {
-                grav_pm_cuda_interpolate_buf(
-                    S.d_x.p, S.ns, G.d_pm_field.p, pm_side, h.box, p.G,
-                    S.d_mesh_acc.p, nullptr, G.compute_stream);
+              grav_pm_cuda_solve_on_device(G.d_pm_density.p, fld_dst, pm_side, h.box, r_s, G.compute_stream);
+              for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
+                const auto& S = G.slabs[ls];
+                if (S.ns > 0) {
+                  grav_pm_cuda_interpolate_buf_shift(
+                      S.d_x.p, S.ns, fld_dst, pm_side, h.box, p.G,
+                      S.d_mesh_acc.p, nullptr, pm_shift, pm_scale, pm_pass, G.compute_stream);
+                }
               }
-            }
-            check(cudaStreamSynchronize(G.compute_stream));
-          } else {
-            check(cudaMemsetAsync(G.d_pm_density.p, 0, pm_points * sizeof(double), G.compute_stream));
-            for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
-              const auto& S = G.slabs[ls];
-              if (S.ns > 0) {
-                grav_pm_cuda_deposit_buf(
-                    S.d_x.p, mass_uniform ? nullptr : S.d_mass.p, first_mass,
-                    S.ns, G.d_pm_density.p, pm_side, h.box, G.compute_stream);
+              check(cudaStreamSynchronize(G.compute_stream));
+            } else {
+              double4* fld_dst = pm_pass ? G.d_pm_field_shift.p : G.d_pm_field.p;
+              check(cudaMemsetAsync(G.d_pm_density.p, 0, pm_points * sizeof(double), G.compute_stream));
+              for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
+                const auto& S = G.slabs[ls];
+                if (S.ns > 0) {
+                  grav_pm_cuda_deposit_buf_shift(
+                      S.d_x.p, mass_uniform ? nullptr : S.d_mass.p, first_mass,
+                      S.ns, G.d_pm_density.p, pm_side, h.box, pm_shift, G.compute_stream);
+                }
               }
-            }
-            check(cudaMemcpyAsync(h_pm_dens[g].p, G.d_pm_density.p,
-                                  pm_points * sizeof(double),
-                                  cudaMemcpyDeviceToHost, G.compute_stream));
-            check(cudaStreamSynchronize(G.compute_stream));
-#pragma omp barrier
-            if (g == 0) {
-              double* d0 = static_cast<double*>(h_pm_dens[0].p);
-              for (int gg = 1; gg < num_gpus; ++gg) {
-                const double* dg = static_cast<const double*>(h_pm_dens[gg].p);
-                for (size_t i = 0; i < pm_points; ++i) d0[i] += dg[i];
-              }
-              check(cudaMemcpyAsync(G.d_pm_density.p, d0, pm_points * sizeof(double),
-                                    cudaMemcpyHostToDevice, G.compute_stream));
-              grav_pm_cuda_solve_on_device(G.d_pm_density.p, G.d_pm_field.p, pm_side, h.box, r_s, G.compute_stream);
-              check(cudaMemcpyAsync(h_pm_field.p, G.d_pm_field.p,
-                                    pm_points * sizeof(double4),
+              check(cudaMemcpyAsync(h_pm_dens[g].p, G.d_pm_density.p,
+                                    pm_points * sizeof(double),
                                     cudaMemcpyDeviceToHost, G.compute_stream));
               check(cudaStreamSynchronize(G.compute_stream));
-            }
 #pragma omp barrier
-            if (g > 0) {
-              check(cudaMemcpyAsync(G.d_pm_field.p, h_pm_field.p,
-                                    pm_points * sizeof(double4),
-                                    cudaMemcpyHostToDevice, G.compute_stream));
-            }
-            for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
-              const auto& S = G.slabs[ls];
-              if (S.ns > 0) {
-                grav_pm_cuda_interpolate_buf(
-                    S.d_x.p, S.ns, G.d_pm_field.p, pm_side, h.box, p.G,
-                    S.d_mesh_acc.p, nullptr, G.compute_stream);
+              if (g == 0) {
+                double* d0 = static_cast<double*>(h_pm_dens[0].p);
+                for (int gg = 1; gg < num_gpus; ++gg) {
+                  const double* dg = static_cast<const double*>(h_pm_dens[gg].p);
+                  for (size_t i = 0; i < pm_points; ++i) d0[i] += dg[i];
+                }
+                check(cudaMemcpyAsync(G.d_pm_density.p, d0, pm_points * sizeof(double),
+                                      cudaMemcpyHostToDevice, G.compute_stream));
+                grav_pm_cuda_solve_on_device(G.d_pm_density.p, fld_dst, pm_side, h.box, r_s, G.compute_stream);
+                check(cudaMemcpyAsync(h_pm_field.p, fld_dst,
+                                      pm_points * sizeof(double4),
+                                      cudaMemcpyDeviceToHost, G.compute_stream));
+                check(cudaStreamSynchronize(G.compute_stream));
               }
-            }
-            check(cudaStreamSynchronize(G.compute_stream));
 #pragma omp barrier
+              if (g > 0) {
+                check(cudaMemcpyAsync(fld_dst, h_pm_field.p,
+                                      pm_points * sizeof(double4),
+                                      cudaMemcpyHostToDevice, G.compute_stream));
+              }
+              for (int ls = 0; ls < G.slabs_per_gpu; ++ls) {
+                const auto& S = G.slabs[ls];
+                if (S.ns > 0) {
+                  grav_pm_cuda_interpolate_buf_shift(
+                      S.d_x.p, S.ns, fld_dst, pm_side, h.box, p.G,
+                      S.d_mesh_acc.p, nullptr, pm_shift, pm_scale, pm_pass, G.compute_stream);
+                }
+              }
+              check(cudaStreamSynchronize(G.compute_stream));
+#pragma omp barrier
+            }
           }
           if (g == 0) pm_ms = (wall() - t_pm0) * 1000.0;
         }
@@ -5867,13 +5890,19 @@ int main(int argc, char** argv) {
           const bool is_energy_step = energy_log && (is_pm_step || is_final || (!periodic && (ti % p.short_span_cap == 0)));
           if (is_energy_step && ns > 0) {
             if (periodic) {
-              if (pm_dist_enabled) {
-                dist_pm.interpolate(g, S.d_x.p, size_t(ns), h.box, p.G,
-                                    S.d_mesh_acc.p, G.d_pm_pot);
-              } else {
-                grav_pm_cuda_interpolate_buf(
-                    S.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
-                    S.d_mesh_acc.p, G.d_pm_pot, G.compute_stream);
+              const int ipasses = pm_cfg.interlace ? 2 : 1;
+              const float iscale = pm_cfg.interlace ? 0.5f : 1.0f;
+              for (int pp = 0; pp < ipasses; ++pp) {
+                const double pshift = pp ? 0.5 : 0.0;
+                if (pm_dist_enabled) {
+                  dist_pm.interpolate_shift(g, S.d_x.p, size_t(ns), h.box, p.G,
+                                            S.d_mesh_acc.p, G.d_pm_pot, pp, pshift, iscale, pp);
+                } else {
+                  grav_pm_cuda_interpolate_buf_shift(
+                      S.d_x.p, size_t(ns), pp ? G.d_pm_field_shift.p : G.d_pm_field.p,
+                      pm_side, h.box, p.G, S.d_mesh_acc.p, G.d_pm_pot,
+                      pshift, iscale, pp, G.compute_stream);
+                }
               }
             }
             const double closing_pm_e =
@@ -5929,13 +5958,19 @@ int main(int argc, char** argv) {
             check(cudaStreamSynchronize(G.copy_stream));
             const double te0 = wall();
             if (periodic) {
-              if (pm_dist_enabled) {
-                dist_pm.interpolate(g, S.d_x.p, size_t(ns), h.box, p.G,
-                                    S.d_mesh_acc.p, G.d_pm_pot);
-              } else {
-                grav_pm_cuda_interpolate_buf(
-                    S.d_x.p, size_t(ns), G.d_pm_field.p, pm_side, h.box, p.G,
-                    S.d_mesh_acc.p, G.d_pm_pot, G.compute_stream);
+              const int ipasses = pm_cfg.interlace ? 2 : 1;
+              const float iscale = pm_cfg.interlace ? 0.5f : 1.0f;
+              for (int pp = 0; pp < ipasses; ++pp) {
+                const double pshift = pp ? 0.5 : 0.0;
+                if (pm_dist_enabled) {
+                  dist_pm.interpolate_shift(g, S.d_x.p, size_t(ns), h.box, p.G,
+                                            S.d_mesh_acc.p, G.d_pm_pot, pp, pshift, iscale, pp);
+                } else {
+                  grav_pm_cuda_interpolate_buf_shift(
+                      S.d_x.p, size_t(ns), pp ? G.d_pm_field_shift.p : G.d_pm_field.p,
+                      pm_side, h.box, p.G, S.d_mesh_acc.p, G.d_pm_pot,
+                      pshift, iscale, pp, G.compute_stream);
+                }
               }
             } else {
               check(cudaMemsetAsync(G.d_pm_pot, 0, size_t(ns) * sizeof(float), G.compute_stream));
@@ -6282,19 +6317,25 @@ int main(int argc, char** argv) {
           }
           if (periodic) {
             if (!is_pm_step) {
-              check(cudaMemsetAsync(G0.d_pm_density.p, 0, pm_points * sizeof(double), G0.compute_stream));
-              for (int ls = 0; ls < G0.slabs_per_gpu; ++ls) {
-                const auto& sl = G0.slabs[ls];
-                if (sl.ns > 0) {
-                  grav_pm_cuda_deposit_buf(
-                      sl.d_x.p, mass_uniform ? nullptr : sl.d_mass.p, first_mass,
-                      sl.ns, G0.d_pm_density.p, pm_side, h.box, G0.compute_stream);
+              const int fc_passes = pm_cfg.interlace ? 2 : 1;
+              const float fc_scale = pm_cfg.interlace ? 0.5f : 1.0f;
+              for (int fp = 0; fp < fc_passes; ++fp) {
+                const double fshift = fp ? 0.5 : 0.0;
+                double4* fld_dst = fp ? G0.d_pm_field_shift.p : G0.d_pm_field.p;
+                check(cudaMemsetAsync(G0.d_pm_density.p, 0, pm_points * sizeof(double), G0.compute_stream));
+                for (int ls = 0; ls < G0.slabs_per_gpu; ++ls) {
+                  const auto& sl = G0.slabs[ls];
+                  if (sl.ns > 0) {
+                    grav_pm_cuda_deposit_buf_shift(
+                        sl.d_x.p, mass_uniform ? nullptr : sl.d_mass.p, first_mass,
+                        sl.ns, G0.d_pm_density.p, pm_side, h.box, fshift, G0.compute_stream);
+                  }
                 }
+                grav_pm_cuda_solve_on_device(G0.d_pm_density.p, fld_dst, pm_side, h.box, r_s, G0.compute_stream);
+                grav_pm_cuda_interpolate_buf_shift(
+                    d_fc_tgt_x.p, size_t(n_fc_tgt), fld_dst, pm_side, h.box, p.G,
+                    d_fc_gpu_mesh.p, nullptr, fshift, fc_scale, fp, G0.compute_stream);
               }
-              grav_pm_cuda_solve_on_device(G0.d_pm_density.p, G0.d_pm_field.p, pm_side, h.box, r_s, G0.compute_stream);
-              grav_pm_cuda_interpolate_buf(
-                  d_fc_tgt_x.p, size_t(n_fc_tgt), G0.d_pm_field.p, pm_side, h.box, p.G,
-                  d_fc_gpu_mesh.p, nullptr, G0.compute_stream);
             }
             const int n_modes = int(h_ewald_modes.size());
             ewald_kspace_accum_kernel<<<n_modes, 256, 0, G0.compute_stream>>>(
