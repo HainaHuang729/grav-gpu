@@ -64,6 +64,12 @@ $(BUILD_DIR)/grav_hydro: src/grav_hydro_driver.cu src/grav_cuda_hydro.cu src/gra
 
 hydro: $(BUILD_DIR)/grav_hydro
 
+$(BUILD_DIR)/grav_cosmo_hydro: src/grav_cosmo_hydro.cu src/grav_cuda_pm.cu src/grav_cuda_pm.h src/grav_pm_config.cuh src/grav_neutrino.cuh src/grav_fr_gravity.cuh | $(BUILD_DIR)
+	$(NVCC) $(NVCC_COMMON) -DGADGET2_LONG_RANGE_CORRECTION -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -Isrc -I$(MATHLIB_INC) -L$(MATHLIB_LIB) \
+		src/grav_cosmo_hydro.cu src/grav_cuda_pm.cu -lcufft -o $@
+
+cosmo-hydro: $(BUILD_DIR)/grav_cosmo_hydro
+
 $(BUILD_DIR)/grav_cuda_fof.so: src/grav_cuda_fof.cu src/grav_cuda_fof.h | $(BUILD_DIR)
 	$(NVCC) $(NVCC_COMMON) -Xcompiler "-fPIC -fopenmp" -shared -Isrc src/grav_cuda_fof.cu -o $@
 

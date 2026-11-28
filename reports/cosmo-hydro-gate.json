@@ -1,0 +1,56 @@
+{
+  "generated_at": "2026-11-28",
+  "cluster": "phy-gpus (node b4, NVIDIA GeForce RTX 4090, CUDA 12.6)",
+  "slurm_job_id": 492194,
+  "total_job_elapsed": "00:06:29",
+  "status": "PASSED (3/3 cosmological coupled PM + SPH benchmarks)",
+  "solver": "src/grav_cosmo_hydro.cu + src/grav_cuda_pm.cu (comoving Friedmann KDK, TSC/PCS+Interlace+-ik cuFFT PM for Gas+DM, 3D Wendland C2 SPH, exact Hubble adiabatic expansion, Sutherland-Dopita radiative cooling, Schmidt-law star formation)",
+  "benchmarks": {
+    "comoving_adiabatic_expansion": {
+      "n_gas": 4096,
+      "a_range": [0.05, 1.0],
+      "steps": 200,
+      "wall_s": 1.95,
+      "u_sim": 0.2500000000000005,
+      "u_exact": 0.25,
+      "rel_err": 1.776e-15,
+      "baryon_mass_rel_err": 0.0,
+      "passed": true
+    },
+    "cosmological_zeldovich_pancake_3d": {
+      "n_gas": 32768,
+      "n_dm": 32768,
+      "box_mpc": 64.0,
+      "a_range": [0.02, 1.0],
+      "a_cross": 0.5,
+      "steps": 358,
+      "wall_s": 4.91,
+      "T_midplane_K": 873648.6,
+      "T_midplane_max_K": 4119854.2,
+      "T_outer_K": 4056.0,
+      "shock_temp_jump": 215.4,
+      "midplane_overdensity": 11.30,
+      "baryon_mass_rel_err": 0.0,
+      "passed": true
+    },
+    "cosmological_box_3d_cooling_sf": {
+      "n_gas": 110592,
+      "n_dm": 110592,
+      "box_mpc": 25.0,
+      "a_range": [0.05, 1.0],
+      "steps": 1661,
+      "wall_s": 379.69,
+      "max_gas_overdensity": 10076.0,
+      "p99_gas_overdensity": 2750.0,
+      "T_median_K": 10101.2,
+      "T_p95_K": 1199160.8,
+      "T_max_K": 5747364.6,
+      "frac_WHIM_gt_1e5K": 0.2332,
+      "frac_cold_dense": 0.00141,
+      "m_star_1e10msun": 0.4978,
+      "E_rad_tot": 123737.1,
+      "baryon_mass_rel_err": 3.233e-11,
+      "passed": true
+    }
+  }
+}
