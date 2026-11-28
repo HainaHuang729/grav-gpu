@@ -551,15 +551,16 @@ extern "C" void grav_pm_cuda_solve_on_device(double* d_density, void* d_field_do
   filter<<<blocks(modes_cnt),block_size,0,stream>>>(sw.modes,side,box,split,cfg.order,modes_cnt);
   if (cfg.spectral_grad) {
     auto* field = static_cast<double4*>(d_field_double4);
-    check(cufftExecZ2D(sw.reverse,sw.modes,d_density));
-    pack_field_comp_kernel<<<blocks(points),block_size,0,stream>>>(d_density,field,points,3);
     const double two_pi_over_box = 2.0 * pi / box;
+    // Run the 3 spectral gradient Z2D transforms FIRST because cuFFT Z2D overwrites its input buffer.
     for (int axis = 0; axis < 3; ++axis) {
       spectral_grad_axis_kernel<<<blocks(modes_cnt),block_size,0,stream>>>(
           sw.modes, sw.grad_modes, side, two_pi_over_box, axis, modes_cnt);
       check(cufftExecZ2D(sw.reverse,sw.grad_modes,sw.grad_real));
       pack_field_comp_kernel<<<blocks(points),block_size,0,stream>>>(sw.grad_real,field,points,axis);
     }
+    check(cufftExecZ2D(sw.reverse,sw.modes,d_density));
+    pack_field_comp_kernel<<<blocks(points),block_size,0,stream>>>(d_density,field,points,3);
   } else {
     check(cufftExecZ2D(sw.reverse,sw.modes,d_density));
     differentiate<<<blocks(points),block_size,0,stream>>>(

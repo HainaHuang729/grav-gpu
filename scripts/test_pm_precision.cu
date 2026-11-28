@@ -4,6 +4,18 @@
 //   2. Two-particle Newton's 3rd law momentum conservation (< 1e-13)
 //   3. 3D analytical cosine-wave force accuracy
 //   4. Single-GPU vs multi-GPU GravDistPm parity (< 1e-13) when >= 2 GPUs are visible
+#include "config.h"
+#ifndef SWIFT_KERNEL_LONG_GRAVITY_H
+#ifndef restrict
+#define restrict __restrict__
+#define TEST_PM_LOCAL_RESTRICT
+#endif
+#include "kernel_long_gravity.h"
+#ifdef TEST_PM_LOCAL_RESTRICT
+#undef restrict
+#undef TEST_PM_LOCAL_RESTRICT
+#endif
+#endif
 #include "grav_cuda_pm.h"
 #include "grav_cuda_pm_dist.h"
 #include "grav_pm_config.cuh"
@@ -87,10 +99,11 @@ int main() {
   const std::vector<double3> x2 = {{4.123, 9.456, 15.789}, {11.987, 17.654, 3.321}};
   const std::vector<float> m2 = {1.0f, 1.0f};
 
-  // Test 3 input: 3D cosine density wave on 32^3 lattice (k_int = (2, 1, 0))
+  // Test 3 input: 3D high-k cosine density wave on 32^3 lattice (k_int = (10, 7, 5))
+  // where CIC aliasing and FD4 dispersion are significant (~1-5%) while PCS+interlace+ik is < 1e-4.
   const int ng = 32;
   const double eps_amp = 0.25;
-  const int kx_w = 2, ky_w = 1, kz_w = 0;
+  const int kx_w = 10, ky_w = 7, kz_w = 5;
   const double kfac = 2.0 * pi / box;
   std::vector<double3> xw;
   std::vector<float> mw;
