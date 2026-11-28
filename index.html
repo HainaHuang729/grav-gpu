@@ -14,7 +14,9 @@
   <meta property="og:title" content="gravityCU — 多卡常驻显存 CUDA TreePM &amp; FoF 引擎" />
   <meta property="og:description" content="CUDA/C++ 宇宙学 N 体引力求解器，支持 1024³ 粒子显存常驻演化与 SWIFT/Gadget-4 跨代码交叉校验。" />
   <meta property="og:url" content="https://hainahuang729.github.io/gravityCU/" />
-  <meta name="twitter:card" content="summary" />
+  <meta property="og:image" content="https://hainahuang729.github.io/gravityCU/paper/figures/fig5_opt_speedup_vs_cpu.webp" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="theme-color" content="#f6f8fb" />
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"gravityCU","alternateName":"grav-gpu","description":"Multi-GPU VRAM-resident CUDA TreePM and Friends-of-Friends cosmological N-body gravity solver validated up to 1024^3 particles against SWIFT and Gadget-4.","url":"https://hainahuang729.github.io/gravityCU/","codeRepository":"https://github.com/HainaHuang729/gravityCU","programmingLanguage":["CUDA","C++"],"author":{"@type":"Person","name":"Haina Huang","url":"https://formless-observatory.wuxiangguan.workers.dev/"}}</script>
   <title>gravityCU — 多卡常驻显存 CUDA TreePM &amp; FoF 引擎</title>
   <style>
@@ -375,6 +377,7 @@
         </p>
       </div>
       <div class="header-actions">
+        <a class="lang-link" href="https://formless-observatory.wuxiangguan.workers.dev/projects">无相观 ↗</a>
         <a class="lang-link" href="en.html">EN</a>
         <a class="lang-link" href="https://github.com/HainaHuang729/gravityCU/blob/main/ROADMAP.md" target="_blank" rel="noopener">路线图</a>
         <a class="repo-link" href="https://github.com/HainaHuang729/gravityCU" target="_blank" rel="noopener">GitHub 仓库</a>
@@ -438,7 +441,7 @@
       </div>
 
       <div class="fig-frame">
-        <img id="fig-img" src="paper/figures/fig5_opt_speedup_vs_cpu.png" alt="CPU 与 GPU 速度对比图" />
+        <img id="fig-img" src="paper/figures/fig5_opt_speedup_vs_cpu.webp" alt="CPU 与 GPU 速度对比图" />
         <div class="fig-cap">
           <span id="fig-desc">256³ / 1024³ 演化耗时对比、Opt1–5 核函数拆解（树构建 -96%）及 FoF/SO 加速汇总。</span>
           <a id="fig-pdf" href="paper/figures/fig5_opt_speedup_vs_cpu.pdf" target="_blank" rel="noopener">下载矢量 PDF</a>
@@ -761,19 +764,19 @@ python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_c
 
     const FIGS = {
       speed: {
-        src: "paper/figures/fig5_opt_speedup_vs_cpu.png",
+        src: "paper/figures/fig5_opt_speedup_vs_cpu.webp",
         pdf: "paper/figures/fig5_opt_speedup_vs_cpu.pdf",
         alt: "CPU 与 GPU 速度对比图",
         desc: "256³ / 1024³ 演化耗时对比、Opt1–5 核函数拆解（树构建 -96%）及 FoF/SO 加速汇总。"
       },
       acc: {
-        src: "paper/figures/fig6_accuracy_vs_cpu.png",
+        src: "paper/figures/fig6_accuracy_vs_cpu.webp",
         pdf: "paper/figures/fig6_accuracy_vs_cpu.pdf",
         alt: "CPU 与 GPU 精度对比图",
         desc: "256³ / 1024³ 物质与动量功率谱残差（全波数远低于 0.1%），以及跨子系统精度天梯。"
       },
       codes: {
-        src: "paper/figures/fig7_code_energy_comparison.png",
+        src: "paper/figures/fig7_code_energy_comparison.webp",
         pdf: "paper/figures/fig7_code_energy_comparison.pdf",
         alt: "跨代码时间、实测 NVML 能耗与精度对比图",
         desc: "SWIFT、GADGET-4、PKDGRAV3（1G/2G MPI）与 gravityCU（1G/2G/4G）在 256³ 相同物理参数下的总耗时、NVML 实测 GPU 能耗 + 整机建模能耗与功率谱偏差对比。"

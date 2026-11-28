@@ -14,7 +14,9 @@
   <meta property="og:title" content="gravityCU — Multi-GPU VRAM-Resident CUDA TreePM &amp; FoF Engine" />
   <meta property="og:description" content="CUDA/C++ cosmological N-body TreePM gravity solver scaling to 1024³ particles and cross-validated against SWIFT and Gadget-4." />
   <meta property="og:url" content="https://hainahuang729.github.io/gravityCU/en.html" />
-  <meta name="twitter:card" content="summary" />
+  <meta property="og:image" content="https://hainahuang729.github.io/gravityCU/paper/figures/fig5_opt_speedup_vs_cpu.webp" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="theme-color" content="#f6f8fb" />
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"gravityCU","alternateName":"grav-gpu","description":"Multi-GPU VRAM-resident CUDA TreePM and Friends-of-Friends cosmological N-body gravity solver validated up to 1024^3 particles against SWIFT and Gadget-4.","url":"https://hainahuang729.github.io/gravityCU/en.html","codeRepository":"https://github.com/HainaHuang729/gravityCU","programmingLanguage":["CUDA","C++"],"author":{"@type":"Person","name":"Haina Huang","url":"https://formless-observatory.wuxiangguan.workers.dev/"}}</script>
   <title>gravityCU — Multi-GPU VRAM-Resident CUDA TreePM &amp; FoF Engine</title>
   <style>
@@ -376,6 +378,7 @@
         </p>
       </div>
       <div class="header-actions">
+        <a class="lang-link" href="https://formless-observatory.wuxiangguan.workers.dev/projects">Formless Observatory ↗</a>
         <a class="lang-link" href="index.html">中文</a>
         <a class="lang-link" href="https://github.com/HainaHuang729/gravityCU/blob/main/ROADMAP.md" target="_blank" rel="noopener">Roadmap</a>
         <a class="repo-link" href="https://github.com/HainaHuang729/gravityCU" target="_blank" rel="noopener">GitHub Repo</a>
@@ -439,7 +442,7 @@
       </div>
 
       <div class="fig-frame">
-        <img id="fig-img" src="paper/figures/fig5_opt_speedup_vs_cpu.png" alt="CPU vs GPU Speedup Comparison" />
+        <img id="fig-img" src="paper/figures/fig5_opt_speedup_vs_cpu.webp" alt="CPU vs GPU Speedup Comparison" />
         <div class="fig-cap">
           <span id="fig-desc">256&sup3; / 1024&sup3; wall-clock progression, Opt1–5 kernel breakdown (tree build -96%), and FoF/SO speedups.</span>
           <a id="fig-pdf" href="paper/figures/fig5_opt_speedup_vs_cpu.pdf" target="_blank" rel="noopener">Download Vector PDF</a>
@@ -762,19 +765,19 @@ python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_c
 
     const FIGS = {
       speed: {
-        src: "paper/figures/fig5_opt_speedup_vs_cpu.png",
+        src: "paper/figures/fig5_opt_speedup_vs_cpu.webp",
         pdf: "paper/figures/fig5_opt_speedup_vs_cpu.pdf",
         alt: "CPU vs GPU Speedup Comparison",
         desc: "256³ / 1024³ wall-clock progression, Opt1–5 kernel breakdown (tree build -96%), and FoF/SO speedups."
       },
       acc: {
-        src: "paper/figures/fig6_accuracy_vs_cpu.png",
+        src: "paper/figures/fig6_accuracy_vs_cpu.webp",
         pdf: "paper/figures/fig6_accuracy_vs_cpu.pdf",
         alt: "CPU vs GPU Accuracy Comparison",
         desc: "256³ / 1024³ matter & momentum power residuals (well below 0.1%) and cross-subsystem error ladder."
       },
       codes: {
-        src: "paper/figures/fig7_code_energy_comparison.png",
+        src: "paper/figures/fig7_code_energy_comparison.webp",
         pdf: "paper/figures/fig7_code_energy_comparison.pdf",
         alt: "Cross-Code Runtime, Energy & Accuracy Comparison",
         desc: "Runtime, measured NVML GPU + modeled whole-node energy (Wh), and P_δ(k) accuracy across SWIFT, GADGET-4, PKDGRAV3 (1G/2G MPI), and gravityCU (1G/2G/4G) at 256³."
