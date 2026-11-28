@@ -101,3 +101,43 @@
 | **精度开发 + 物理回归（P1–P3, B1–B2）** | `1–2× RTX 4090` / `A6000` | `24–48 GB` | `1–2 TB NVMe SSD` | $64^3$–$256^3$ Ewald / Zel'dovich / SIDM / 中微子开发验证 |
 | **中等生产 + Zoom-in + 流体（B3–B4）** | `4× RTX 4090` 或 `4× A6000` | `24–48 GB/卡`（4 卡聚合 `96–192 GB`） | `4–8 TB NVMe + 20–50 TB NAS` | $512^3$–$1024^3$ 生产演化、多质量放大暗晕、Santa Barbara 流体星系团 |
 | **远期 $2048^3+$ 超算巡天（S1–S4）** | `64–1,024+` H100/A100（RDMA 互联） | `80 GB HBM3/卡` | 并行文件系统（Lustre/GPFS `100 TB–PB`） | 万亿自由度超算巡天（当前已延后） |
+
+---
+
+## 6. v3.x / v4.0 演进规划：插件化扩展、化学/重子演化与工程瓶颈清单
+
+> **状态基线**：截至 `v2.0.0`（commit `0140ff9`），`P1–P3`、`B1–B4`、宇宙学耦合 PM+SPH（`grav_cosmo_hydro`）、真双节点 MPI（`b[4,6]` Gates M1/M2/M3）以及 v3.0 初步重构（PM/流体零 SWIFT 依赖 + `--config` INI 参数文件 + `GravPhysics` 抽离）已全部通过实测验真。下文记录下一阶段（v3.x / v4.0）待推进的**功能扩展**与**工程瓶颈**，供后续排期与合作者按需认领。
+
+### 6.1 可插拔物理插件架构（Plugin / Stage Registry）
+
+- **统一 `PhysicsStage` 插件接口**：将当前硬编码在主循环中的各物理模块抽象为标准生命周期钩子（`on_init` / `on_pre_pm` / `on_post_force` / `on_post_kick` / `on_snapshot`），允许第三方以单个 `.cuh` 头文件或 `.so` 动态库注册新物理，无需改动主引擎循环。
+- **插件目录与配置绑定**：在 `plugins/` 下提供模板插件（如自定义暗物质截面、自定义暗能量 $w(z)$、自定义外场势、自定义在线诊断），在 `--config run.ini` 中通过 `[plugins] enable = ...` 动态启用。
+- **TreePM + SPH 彻底合流**：将 [src/grav_cosmo_hydro.cu](src/grav_cosmo_hydro.cu) 的 `PartType0` 气体粒子直接合入 [src/multi_gpu_slab.cu](src/multi_gpu_slab.cu) 的短程八叉树 + 3D 域分解主循环，使流体也能享受短程树分辨率、多质量 Zoom-in 与在线 FoF。
+
+### 6.2 天体化学网络与辐射冷却（Chemistry & Cooling）
+
+- **非平衡原初化学网络（GPU 求解器）**：在现有 Sutherland–Dopita 查表冷却基础上，引入 6–9 物种原初化学网络（$\text{H}, \text{H}^+, \text{He}, \text{He}^+, \text{He}^{++}, e^-, \text{H}_2, \text{H}^-, \text{H}_2^+$），采用 GPU 隐式 BDF / Rosenbrock 子步积分，支持第一代恒星（Pop III）与低金属度矮星系冷却。
+- **UV 背景光致电离与自屏蔽**：接入 Haardt & Madau (2012) / Faucher-Giguère (2020) 随红移演化的光致电离加热率 $\Gamma(z)$ 与 Rahmati+2013 氢自屏蔽修正。
+- **金属丰度追踪与金属线冷却**：为气体与恒星粒子增加多元素金属质量分数数组（总金属度 $Z$ 及 $\text{C}, \text{N}, \text{O}, \text{Mg}, \text{Si}, \text{Fe}$），对接 `Grackle` / `CHIMES` / `Ploeckinger & Schaye` 查表式金属线冷却与尘埃冷却。
+
+### 6.3 重子演化与星系形成次网格物理（Galaxy & Baryon Evolution）
+
+- **恒星演化与化学增丰（Stellar Evolution）**：按 IMF（Chabrier / Salpeter）与恒星寿命表追踪星族年龄、质量损失及 **II 型超新星（SNII）**、**Ia 型超新星（SNIa）**、**AGB 星风** 的延迟金属返还（化学增丰注入邻近 SPH 气体）。
+- **恒星反馈（Stellar Feedback）**：在现有 Schmidt 恒星形成律基础上增加随机热反馈（Dalla Vecchia & Schaye 2012，固定 $\Delta T_{\rm heat}$ 避免数值过冷却）与动能星风反馈。
+- **超大质量黑洞与 AGN 反馈（SMBH & AGN）**：
+  - 暗晕在线 FoF 触发黑洞种子植入（$M_{\rm halo} > M_{\rm seed}$）；
+  - GPU 邻域 Bondi–Hoyle 吸积率计算与 Eddington 上限截断；
+  - 双模式 AGN 反馈（高吸积率热/类星体模式 + 低吸积率喷流/射电模式）。
+- **非线性 $f(R)$ GPU 多重网格松弛**：在现有线性 Yukawa + 薄壳屏蔽基础上，补充全非线性 Red–Black Gauss–Seidel GPU 多重网格标量场求解器，对标 `ECOSMOG` / `MG-GADGET` 强非线性小尺度。
+- **在线 GPU 科学分析**：6D 相空间 GPU 子暗晕识别（类 `ROCKSTAR` / `SUBFIND`）、在线光锥弱引力透镜（HEALPix 汇聚图 $\kappa$）与热 SZ / X-ray 射线投影。
+
+### 6.4 已知工程与性能瓶颈清单（v3.x / v4.0 优化目标）
+
+| 编号 | 瓶颈模块 | 当前实测瓶颈现象 | 目标优化方案与预期收益 |
+| --- | --- | --- | --- |
+| **E1** | **跨节点通信**（`grav_domain_3d_mpi.cuh`） | `b[4,6]` `256^3` 跨节点实测 `54.27 s` 中有 `49.46 s`（`91%`）花在 TCP 整片 ghost 粒子拷贝 | 引入 **Locally Essential Tree（LET）远程树剪枝**（仅传远端会展开的多极节点，数据量降 `10–50×`）+ **GPU-Aware MPI / NCCL / GPUDirect RDMA** + 通信与本地力计算异步重叠。 |
+| **E2** | **显存占用**（`multi_gpu_slab.cu`） | 当前约 `~200 B/粒子`（双精度坐标 + 树/打包副本），单张 24 GB 卡粒子上限偏紧 | 粒子坐标改相对 cell 中心的紧凑 FP32 / 32-bit 定点编码 + 紧凑树节点，压降至 **`~90–110 B/粒子`**（同显存可装 `2×` 粒子规模）。 |
+| **E3** | **主驱动单体臃肿** | `multi_gpu_slab.cu`（6,800 行）、`grav_domain_3d_engine.cuh`（3,500 行）、`grav_domain_3d_mpi.cuh`（2,100 行）存在大量重复演化主循环 | 抽离统一的 `SimulationEngine` + 可插拔 `DomainBackend`（`1D` / `3D-NVLink` / `3D-MPI`），消除三份重复循环，将单文件控制在 `< 1,000` 行。 |
+| **E4** | **最后残留外部头文件依赖** | `pm / pm-mpi / hydro / cosmo-hydro / fof` 已 100% 零依赖，仅 `multi_gpu_slab` 的 SWIFT FMM 多极核仍需 `KERNEL_BUILD_DIR` | 将 SWIFT 软化/M2P 多项式原生内置为独立头文件，实现全仓 `git clone && make` 真正零外部依赖。 |
+| **E5** | **高精度模式短程力下限** | `GRAV_PRECISION_MODE=high` 当前 Ewald 误差 `1.01e-5`，受短程树力 FP32 累加下限制约 | 短程 P2P / M2P 力累加升级为 FP64（`double4`）混合精度，目标将 Ewald 全力误差进一步压至 **`~1–3e-6`**。 |
+| **E6** | **I/O 与 Checkpoint** | 目前需通过 Python 脚本在 HDF5 与 `.bin` 之间中转 | 接入原生 Parallel HDF5 / ADIOS2 直接读写与异步增量 Checkpoint，省去中间 `.bin` 落盘与转换时间。 |
