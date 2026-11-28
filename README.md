@@ -247,7 +247,7 @@ For the full 18-week schedule, acceptance gates, and compute/storage tiers, see 
 - [x] **Milestone 2A**: 3D domain MPI topology & contiguous Hilbert `MultiNodeCommStats` (`DOMAIN3D_SMOKE_PASSED`)
 - [x] **Milestone 2B (`np=2`)**: MPI 1D-slab cuFFT PM verified on `phy-gpus` (`b4`, RTX 4090, `np=2, side=128, N=64^3`: `max_rel_field=1.012e-14`, `max_rel_pot=3.177e-16`, `pm_comm_ms=90.875`, `MPI_PM_PASSED`)
 - [x] **Milestone 2C (Build)**: `test_mpi_pm`, `grav_mpi`, and `multi_gpu_slab` compiled cleanly on `phy-gpus` (`sm_89`, OpenMPI 4.1.6 + CUDA 12.6)
-- [ ] **Gates M1/M2/M3**: `1N×4R` / `2N` PM completion, $64^3$ 4-rank/2N parity vs. 1G, and $256^3$ multi-node scaling (`slurm/mpi-multinode-test.sbatch`, pending free GPUs on `phy-gpus`)
+- [x] **Gates M1/M2/M3 (`2N×1G` on `b[4,6]`)**: Verified true cross-node MPI PM (`3.89e-16`, `Slurm 492167`), $64^3$ 2-node 3D Hilbert evolution parity vs. 1G (**`pos_rms/L = 2.59e-6`**, identical `257`-step schedule, `Slurm 492195`), and $256^3$ (`16.78M`) 2-node zero-error completion (`54.27 s`, `Slurm 492195`).
 
 ### Completed Priority Tracks (1–4× Lab GPUs, P1–P3 + B1–B4 All Verified on RTX 4090)
 - [x] **P1 — High-Order PM & External IC Adapters** ([reports/p1-pm-precision-gate.json](reports/p1-pm-precision-gate.json)): `CIC/TSC/PCS` + symmetric `Interlacing` + `-ik` spectral gradient across all 3 PM backends + `monofonIC`/`MUSIC` adapter (`IC_ADAPTER_TESTS_PASSED`). Ewald total-force error ($\theta=0.3$) reduced **`18.5×`** (`1.034e-3 -> 5.58e-5`); 2-node cross-machine MPI PM (`b[4,6]`) verified to `3.89e-16`.

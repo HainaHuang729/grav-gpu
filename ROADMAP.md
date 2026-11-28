@@ -40,7 +40,7 @@
 | **Milestone 2A** | MPI 拓扑规划与 `MultiNodeCommStats`（`src/grav_mpi_comm.h`, `src/grav_domain_3d.h`） | **已通过** | `scripts/test_domain3d_smoke.cpp` 本地与集群均输出 `DOMAIN3D_SMOKE_PASSED`；连续 Hilbert rank 分配显著降低跨节点 ghost 网格与粒子数。 |
 | **Milestone 2B** | 分布式 1D Slab `cuFFT` + `MPI_Alltoallv` PM（`src/grav_cuda_pm_mpi.cu/h`, `scripts/test_mpi_pm.cu`） | **部分通过（`np=2`）** | `phy-gpus` `b4`（RTX 4090, OpenMPI 4.1.6 + CUDA 12.6），`np=2, side=128, N=64^3`：`max_rel_field=1.012e-14`，`max_rel_pot=3.177e-16`，`pm_comm_ms=90.875`，输出 `MPI_PM_PASSED`；`1N×4R / 2N×1G / 2N×2G` 待空闲卡补跑。 |
 | **Milestone 2C** | 3D 域分解 MPI 运行时引擎（`src/grav_domain_3d_mpi.cuh`, `src/multi_gpu_slab.cu`） | **编译通过** | `test_mpi_pm`、`grav_mpi`、`multi_gpu_slab` 在 `phy-gpus`（`sm_89`）全部零错误编出，包含 lazy ghost 基址修正、per-rank `compute_nvel` 与 `ns==0` 集合通信安全处理。 |
-| **Gate M1 / M2 / M3** | `np=4` / 跨节点 PM 收尾、`64^3` 4-rank/2N 等价性门禁、`256^3` 多节点扩展性测试（`slurm/mpi-multinode-test.sbatch`） | **待集群空闲卡** | `phy-gpus` 全部 51 张在线 GPU（`a` 15/15、`b` 32/32、`c` 4/4）均处于满占状态，待释放后立即执行。 |
+| **Gate M1 / M2 / M3** | `2N×1G` 跨节点 PM + `64^3` 跨节点等价性 + `256^3` 跨节点扩展实测（`b[4,6]`） | **已通过（`2N×1G`）** | `Slurm 492167`（`2N×1G` PM `3.89e-16`）+ `Slurm 492195`（`b[4,6]` 真双节点 3D Hilbert `grav_mpi`）：`64^3` 与单卡步进完全一致，`pos_rms/L=2.59e-6`；`256^3`（`16.78M` 粒子）零错完跑（`54.27 s`，TCP ghost 通信占 `49.5 s`，验证了远期 S3 RDMA/LET 剪枝的必要性）。 |
 
 ---
 

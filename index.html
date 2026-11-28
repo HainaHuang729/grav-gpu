@@ -663,6 +663,74 @@
       </p>
     </section>
 
+    <!-- v2.0 Precision & Multi-Physics Gates -->
+    <section id="v2-gates">
+      <div class="sec-head">
+        <h2>v2.0 高精度、多物理与跨节点 MPI 全门禁实测</h2>
+        <span class="badge">RTX 4090 (b4/b6) · 全部门禁通过</span>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>里程碑 / 模块</th>
+            <th>核心能力</th>
+            <th class="num">实测验收指标（RTX 4090）</th>
+            <th class="num">状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>P1 高阶 PM + IC 适配</strong></td>
+            <td><code>CIC/TSC/PCS</code> + <code>Interlacing</code> + <code>-ik</code> + <code>monofonIC/MUSIC</code></td>
+            <td class="num">Ewald <code>5.58e-5</code>（<strong>18.5×</strong>），2N MPI PM <code>3.89e-16</code></td>
+            <td class="num"><span class="pill best">通过</span></td>
+          </tr>
+          <tr class="highlight">
+            <td><strong>P2 高精度引力模式</strong></td>
+            <td><code>GRAV_PRECISION_MODE=high</code>（<code>rcut=5.5</code>, 精确 <code>erfc/exp</code>, <code>mac=1e-4</code>）</td>
+            <td class="num">Ewald <strong><code>1.014e-5</code>（102×）</strong> · Zel'dovich <strong><code>0.0382%</code>（14.5×）</strong></td>
+            <td class="num"><span class="pill best">通过</span></td>
+          </tr>
+          <tr>
+            <td><strong>P3 自适应辛步长</strong></td>
+            <td>动力学时标 <code>τ_dyn</code> + 软化穿越 + <code>GRAV_SYNC_STEP=1</code></td>
+            <td class="num">32K Plummer 能量漂移 <strong><code>7.64e-7</code>（15.1×）</strong></td>
+            <td class="num"><span class="pill best">通过</span></td>
+          </tr>
+          <tr>
+            <td><strong>B1 有质量中微子</strong></td>
+            <td>零额外显存 <code>k</code>-空间线性响应 + Komatsu+2011 <code>H(a)</code> + <code>CLASS/CAMB</code> 表</td>
+            <td class="num">三尺度自由流抑制 vs. 精确 ODE <strong><code>0.009%–0.028%</code></strong></td>
+            <td class="num"><span class="pill best">通过</span></td>
+          </tr>
+          <tr>
+            <td><strong>B2 暗区物理（SIDM + f(R)）</strong></td>
+            <td>叶节点无竞争 GPU MC-SIDM + Hu–Sawicki <code>n=1</code> <code>f(R)</code> 变色龙屏蔽</td>
+            <td class="num">SIDM <code>107k</code> 散射（<code>9.35e-12</code> 动能守恒）· <code>f(R)</code> <strong><code>0.0001%–0.179%</code></strong></td>
+            <td class="num"><span class="pill best">通过</span></td>
+          </tr>
+          <tr>
+            <td><strong>B3 多质量 Zoom-in</strong></td>
+            <td>9 层嵌套等效 <strong>4096³</strong> + 逐粒子软化 <code>GRAV_SOFT_IN</code> + 污染审计</td>
+            <td class="num"><code>16.78M×</code> 质量比 · <strong><code>R200c/2R200c</code> 零污染</strong> · <code>35</code> 次暗晕</td>
+            <td class="num"><span class="pill best">通过</span></td>
+          </tr>
+          <tr class="highlight">
+            <td><strong>B4 全 GPU 流体 + 宇宙学耦合</strong></td>
+            <td>3D Wendland C2 SPH + 辐射冷却 + Schmidt 恒星形成 + 耦合 PM+SPH</td>
+            <td class="num">Sod <code>2.28%</code> · Sedov <code>0.67%</code> · K-H <code>516×</code> · 冷却 <code>2.44e-15</code> · 221K 宇宙盒 WHIM <code>23.3%</code></td>
+            <td class="num"><span class="pill best">8/8 通过</span></td>
+          </tr>
+          <tr>
+            <td><strong>Phase 2 跨节点 MPI</strong></td>
+            <td>真双节点 <code>b[4,6]</code>（<code>2N×1G</code>）3D Hilbert <code>grav_mpi</code></td>
+            <td class="num">64³ 等价 <strong><code>pos_rms/L = 2.59e-6</code></strong> · 256³（<code>16.78M</code>）跨节点零错完跑</td>
+            <td class="num"><span class="pill best">通过</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <!-- Quick Start -->
     <section>
       <div class="sec-head">

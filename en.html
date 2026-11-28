@@ -664,6 +664,74 @@
       </p>
     </section>
 
+    <!-- v2.0 Precision & Multi-Physics Gates -->
+    <section id="v2-gates">
+      <div class="sec-head">
+        <h2>v2.0 Precision, Multi-Physics &amp; Multi-Node MPI Gates</h2>
+        <span class="badge">RTX 4090 (b4/b6) &middot; All Gates Verified</span>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Milestone / Module</th>
+            <th>Capabilities</th>
+            <th class="num">Verified RTX 4090 Metrics</th>
+            <th class="num">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>P1 High-Order PM &amp; ICs</strong></td>
+            <td><code>CIC/TSC/PCS</code> + <code>Interlacing</code> + <code>-ik</code> + <code>monofonIC/MUSIC</code></td>
+            <td class="num">Ewald <code>5.58e-5</code> (<strong>18.5&times;</strong>), 2N MPI PM <code>3.89e-16</code></td>
+            <td class="num"><span class="pill best">Passed</span></td>
+          </tr>
+          <tr class="highlight">
+            <td><strong>P2 High-Precision Mode</strong></td>
+            <td><code>GRAV_PRECISION_MODE=high</code> (<code>rcut=5.5</code>, exact <code>erfc/exp</code>, <code>mac=1e-4</code>)</td>
+            <td class="num">Ewald <strong><code>1.014e-5</code> (102&times;)</strong> &middot; Zel'dovich <strong><code>0.0382%</code> (14.5&times;)</strong></td>
+            <td class="num"><span class="pill best">Passed</span></td>
+          </tr>
+          <tr>
+            <td><strong>P3 Adaptive Symplectic</strong></td>
+            <td>Dynamical <code>&tau;_dyn</code> + softening-crossing + <code>GRAV_SYNC_STEP=1</code></td>
+            <td class="num">32K Plummer energy drift <strong><code>7.64e-7</code> (15.1&times;)</strong></td>
+            <td class="num"><span class="pill best">Passed</span></td>
+          </tr>
+          <tr>
+            <td><strong>B1 Massive Neutrinos</strong></td>
+            <td>Zero-VRAM <code>k</code>-space linear response + Komatsu+2011 <code>H(a)</code> + <code>CLASS/CAMB</code></td>
+            <td class="num">3-scale suppression vs. exact ODE <strong><code>0.009%&ndash;0.028%</code></strong></td>
+            <td class="num"><span class="pill best">Passed</span></td>
+          </tr>
+          <tr>
+            <td><strong>B2 Dark Sector (SIDM + f(R))</strong></td>
+            <td>Race-free leaf GPU MC-SIDM + Hu&ndash;Sawicki <code>n=1</code> <code>f(R)</code> chameleon</td>
+            <td class="num">SIDM <code>107k</code> scatters (<code>9.35e-12</code> &Delta;E) &middot; <code>f(R)</code> <strong><code>0.0001%&ndash;0.179%</code></strong></td>
+            <td class="num"><span class="pill best">Passed</span></td>
+          </tr>
+          <tr>
+            <td><strong>B3 Multi-Mass Zoom-in</strong></td>
+            <td>9-level <strong>4096&sup3;-equiv</strong> + per-particle <code>GRAV_SOFT_IN</code> + audit</td>
+            <td class="num"><code>16.78M&times;</code> mass ratio &middot; <strong>0 LR in R200c/2R200c</strong> &middot; <code>35</code> subhalos</td>
+            <td class="num"><span class="pill best">Passed</span></td>
+          </tr>
+          <tr class="highlight">
+            <td><strong>B4 Full-GPU Hydro + Cosmo</strong></td>
+            <td>3D Wendland C2 SPH + cooling + Schmidt SF + coupled PM+SPH</td>
+            <td class="num">Sod <code>2.28%</code> &middot; Sedov <code>0.67%</code> &middot; K-H <code>516&times;</code> &middot; Cool <code>2.44e-15</code> &middot; 221K box WHIM <code>23.3%</code></td>
+            <td class="num"><span class="pill best">8/8 Passed</span></td>
+          </tr>
+          <tr>
+            <td><strong>Phase 2 Cross-Node MPI</strong></td>
+            <td>True 2-node <code>b[4,6]</code> (<code>2N&times;1G</code>) 3D Hilbert <code>grav_mpi</code></td>
+            <td class="num">64&sup3; parity <strong><code>pos_rms/L = 2.59e-6</code></strong> &middot; 256&sup3; (<code>16.78M</code>) zero-error</td>
+            <td class="num"><span class="pill best">Passed</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <!-- Quick Start -->
     <section>
       <div class="sec-head">

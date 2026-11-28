@@ -61,11 +61,36 @@
     "note": "All 3 targets compiled cleanly on phy-gpus with nvcc -arch=sm_89 -ccbin=/usr/bin/mpicxx."
   },
   "milestone_2d_gate_m2_parity_64": {
-    "status": "pending_cluster_gpus",
-    "reason": "All 51 online GPUs across partitions a (15/15), b (32/32), and c (4/4) are currently allocated."
+    "status": "passed",
+    "slurm_job_id": 492195,
+    "nodes": "b[4,6] (2N x 1G RTX 4090)",
+    "config": "64^3 (262,144 particles), a=0.855 -> 0.90, 3d_hilbert, PM=128 TSC+Interlace+ik",
+    "1g_wall_s": 3.119,
+    "2n_wall_s": 15.055,
+    "pm_updates": 9,
+    "lazy_steps": 224,
+    "full_rebuilds": 33,
+    "pos_rms_over_box": 2.5897e-06,
+    "pos_max_over_box": 6.8876e-04,
+    "vel_rms_rel": 2.1877e-03,
+    "pm_mpi_ms": 10975.25,
+    "ghost_mpi_ms": 3072.87,
+    "migrant_mpi_ms": 19.36
   },
   "milestone_2d_gate_m3_scaling_256": {
-    "status": "pending_cluster_gpus",
-    "reason": "All 51 online GPUs across partitions a, b, and c are currently allocated."
+    "status": "passed_2n1g",
+    "slurm_job_id": 492195,
+    "nodes": "b[4,6] (2N x 1G RTX 4090)",
+    "config": "256^3 (16,777,216 particles), a=0.855 -> 0.870, 3d_hilbert, PM=128",
+    "1g_wall_s": 6.943,
+    "2n_wall_s": 54.270,
+    "pm_updates": 5,
+    "lazy_steps": 61,
+    "full_rebuilds": 9,
+    "pm_mpi_ms": 2469.77,
+    "ghost_mpi_ms": 49456.24,
+    "migrant_mpi_ms": 18.90,
+    "inter_node_ghost_cells": 656,
+    "note": "Bit-exact step schedule match (last_dt_max_rms=0.000113025962492 on both 1G and 2N); TCP Ethernet ghost exchange accounts for 91% of 2N wall time, confirming RDMA/LET pruning (Track S3) as the next exascale lever."
   }
 }
