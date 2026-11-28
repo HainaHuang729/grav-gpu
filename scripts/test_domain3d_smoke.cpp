@@ -43,6 +43,23 @@ int main() {
       assert(total_ghost == plan.stats.ghost_total);
     }
   }
+  // Multi-node locality check: contiguous Hilbert curve rank assignment across nodes
+  // must cut inter-node ghost volume relative to round-robin node assignment.
+  for (int nodes : {2, 4}) {
+    const int gpus = nodes * 4;
+    const Domain3DPlan plan = build_domain_3d_plan(counts, weights, gpus, DomainMode::Hilbert3D, 128);
+    std::vector<int> contig(gpus), rr(gpus);
+    for (int r = 0; r < gpus; ++r) {
+      contig[r] = r / 4;
+      rr[r] = r % nodes;
+    }
+    const MultiNodeCommStats sc = compute_multinode_comm_stats(plan, contig, &counts);
+    const MultiNodeCommStats sr = compute_multinode_comm_stats(plan, rr, &counts);
+    assert(sc.intra_node_ghost_cells + sc.inter_node_ghost_cells == uint64_t(plan.stats.ghost_total));
+    assert(sr.intra_node_ghost_cells + sr.inter_node_ghost_cells == uint64_t(plan.stats.ghost_total));
+    assert(sc.inter_node_ghost_cells < sr.inter_node_ghost_cells);
+    assert(sc.inter_node_ghost_parts < sr.inter_node_ghost_parts);
+  }
   std::cout << "DOMAIN3D_SMOKE_PASSED\n";
   return 0;
 }

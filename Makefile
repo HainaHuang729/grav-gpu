@@ -1,10 +1,11 @@
-# Build & Smoke-Test Makefile for grav-gpu
+# Build & Smoke-Test Makefile for gravityCU
 
 _DETECTED_NVCC := $(shell command -v nvcc 2>/dev/null)
 CUDA_HOME ?= $(if $(_DETECTED_NVCC),$(patsubst %/bin/nvcc,%,$(_DETECTED_NVCC)),/usr/local/cuda)
 NVCC ?= $(CUDA_HOME)/bin/nvcc
 CUDA_ARCH ?= sm_86
 CXX ?= g++
+MPICXX ?= mpicxx
 CC ?= gcc
 PYTHON ?= python3
 
@@ -33,7 +34,7 @@ KERNEL_REQ_SRCS := \
 
 NVCC_COMMON := -O3 -std=c++17 -arch=$(CUDA_ARCH) --fmad=true -ccbin=$(CXX)
 
-.PHONY: help all standalone fof pm cic engine test-domain3d test-fof smoke clean check-kernels
+.PHONY: help all standalone fof pm pm-mpi cic engine mpi-engine test-domain3d test-fof test-mpi-pm smoke clean check-kernels
 
 help:
 	@echo "Targets:"
@@ -63,11 +64,16 @@ $(BUILD_DIR)/grav_cuda_fof.so: src/grav_cuda_fof.cu src/grav_cuda_fof.h | $(BUIL
 
 pm: check-kernels $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_dist.o
 
+pm-mpi: check-kernels $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_mpi.o
+
 $(BUILD_DIR)/grav_cuda_pm.o: src/grav_cuda_pm.cu src/grav_cuda_pm.h | $(BUILD_DIR)
 	$(NVCC) $(NVCC_COMMON) -Xcompiler -fPIC -c -Isrc -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -I$(MATHLIB_INC) src/grav_cuda_pm.cu -o $@
 
 $(BUILD_DIR)/grav_cuda_pm_dist.o: src/grav_cuda_pm_dist.cu src/grav_cuda_pm_dist.h | $(BUILD_DIR)
 	$(NVCC) $(NVCC_COMMON) -Xcompiler -fPIC -c -Isrc -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -I$(MATHLIB_INC) src/grav_cuda_pm_dist.cu -o $@
+
+$(BUILD_DIR)/grav_cuda_pm_mpi.o: src/grav_cuda_pm_mpi.cu src/grav_cuda_pm_mpi.h src/grav_mpi_comm.h | $(BUILD_DIR)
+	$(NVCC) -O3 -std=c++17 -arch=$(CUDA_ARCH) --fmad=true -ccbin=$(MPICXX) -Xcompiler -fPIC -c -Isrc -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -I$(MATHLIB_INC) src/grav_cuda_pm_mpi.cu -o $@
 
 cic: $(BUILD_DIR)/libcic_deposit.so
 
@@ -79,6 +85,16 @@ test-domain3d: $(BUILD_DIR)/test_domain3d
 
 $(BUILD_DIR)/test_domain3d: scripts/test_domain3d_smoke.cpp src/grav_domain_3d.h | $(BUILD_DIR)
 	$(CXX) -O2 -std=c++17 -Wall -Wextra -Werror -Isrc scripts/test_domain3d_smoke.cpp -o $@
+
+$(BUILD_DIR)/test_mpi_pm: check-kernels scripts/test_mpi_pm.cu $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_mpi.o src/grav_domain_3d.h | $(BUILD_DIR)
+	$(NVCC) -O3 -std=c++17 -arch=$(CUDA_ARCH) --fmad=true -ccbin=$(MPICXX) \
+		-Isrc -I$(KERNEL_BUILD_DIR) -I$(KERNEL_BUILD_DIR)/src -I$(MATHLIB_INC) \
+		-L$(MATHLIB_LIB) scripts/test_mpi_pm.cu $(BUILD_DIR)/grav_cuda_pm.o $(BUILD_DIR)/grav_cuda_pm_mpi.o \
+		-lcufft -o $@
+
+test-mpi-pm: $(BUILD_DIR)/test_mpi_pm
+	LD_LIBRARY_PATH="$(MATHLIB_LIB):$(CUDA_HOME)/lib64:$${LD_LIBRARY_PATH:-}" \
+		mpirun -np 2 ./$(BUILD_DIR)/test_mpi_pm
 
 test-fof: fof
 	LD_LIBRARY_PATH="$(CUDA_HOME)/lib64:$(MATHLIB_LIB):$${LD_LIBRARY_PATH:-}" \
@@ -120,6 +136,15 @@ $(BUILD_DIR)/slab_resident: $(GEN_DIR)/.prepared src/slab_resident.cu src/groupe
 		-lcufft -o $@
 
 engine: $(BUILD_DIR)/multi_gpu_slab $(BUILD_DIR)/slab_resident
+
+$(BUILD_DIR)/grav_mpi: $(GEN_DIR)/.prepared src/multi_gpu_slab.cu src/grouped_force.cuh src/grav_domain_3d.h src/grav_domain_3d_engine.cuh src/grav_domain_3d_mpi.cuh src/grav_mpi_comm.h src/grav_cuda_pm.cu src/grav_cuda_pm.h src/grav_cuda_pm_dist.cu src/grav_cuda_pm_dist.h src/grav_cuda_pm_mpi.cu src/grav_cuda_pm_mpi.h src/grav_cuda_fof.cu src/grav_cuda_fof.h
+	$(NVCC) -O3 -std=c++17 -arch=$(CUDA_ARCH) --fmad=true -ccbin=$(MPICXX) \
+		-DGRAV_FAST_M2P_EXP -DGRAV_ENABLE_MPI -Xcompiler -fopenmp \
+		-I$(GEN_DIR) -I$(GEN_DIR)/src -I$(KERNEL_BUILD_DIR)/src -Isrc -I$(MATHLIB_INC) \
+		-L$(MATHLIB_LIB) src/multi_gpu_slab.cu src/grav_cuda_pm.cu src/grav_cuda_pm_dist.cu src/grav_cuda_pm_mpi.cu src/grav_cuda_fof.cu \
+		-lcufft -o $@
+
+mpi-engine: $(BUILD_DIR)/grav_mpi
 
 smoke: engine fof test-domain3d
 	$(PYTHON) scripts/make_smoke_ic.py $(BUILD_DIR)/smoke_64.bin

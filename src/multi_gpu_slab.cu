@@ -30,6 +30,9 @@
 #include "grav_cuda_pm_dist.h"
 #include "grav_cuda_fof.h"
 #include "grav_domain_3d.h"
+#ifdef GRAV_ENABLE_MPI
+#include "grav_cuda_pm_mpi.h"
+#endif
 #include "validated_device_tree.cuh"
 #include "gpu_gravity_functions.cuh"
 #ifdef GRAV_FAST_M2P_EXP
@@ -3510,8 +3513,25 @@ __global__ void gather_fc_samples_kernel(
 }
 
 #include "grav_domain_3d_engine.cuh"
+#include "grav_domain_3d_mpi.cuh"
 
 int main(int argc, char** argv) {
+#ifdef GRAV_ENABLE_MPI
+  MPI_Init(&argc, &argv);
+  grav_mpi::GravMpiCtx mpi_ctx;
+  if (argc != 4) {
+    int r = 0;
+    MPI_Comm_rank(MPI_COMM_WORLD, &r);
+    if (r == 0) std::cerr << "Usage: " << argv[0] << " <input.bin> <output.bin> <a_end>\n";
+    MPI_Finalize();
+    return 2;
+  }
+  try {
+    mpi_ctx.init(MPI_COMM_WORLD);
+    const double started = wall();
+    const int dev_count = 1;
+    const int num_gpus = mpi_ctx.world_size;
+#else
   if (argc != 4) {
     std::cerr << "Usage: " << argv[0] << " <input.bin> <output.bin> <a_end>\n";
     return 2;
@@ -3527,6 +3547,7 @@ int main(int argc, char** argv) {
       throw std::runtime_error("Invalid GRAV_NUM_GPUS=" + std::to_string(num_gpus) +
                                " (dev_count=" + std::to_string(dev_count) + ")");
     }
+#endif
 
     const char* periodic_env = std::getenv("GRAV_PERIODIC");
     const char* comoving_env = std::getenv("GRAV_COMOVING");
@@ -3801,6 +3822,14 @@ int main(int argc, char** argv) {
       throw std::runtime_error("Invalid GRAV_REBALANCE_INTERVAL or GRAV_REBALANCE_MIN_GAIN");
     }
     grav3d::DomainMode domain_mode = grav3d::parse_domain_mode(domain_mode_env, num_gpus);
+#ifdef GRAV_ENABLE_MPI
+    if (!periodic || !split_force_enabled) {
+      throw std::runtime_error("GRAV_ENABLE_MPI requires GRAV_PERIODIC=1 and GRAV_SPLIT_FORCE=1");
+    }
+    if (domain_mode == grav3d::DomainMode::Slab1D) {
+      domain_mode = grav3d::DomainMode::Hilbert3D;
+    }
+#else
     if (domain_mode != grav3d::DomainMode::Slab1D && (!periodic || !split_force_enabled)) {
       if (domain_mode_env && std::string(domain_mode_env) != "auto" &&
           std::string(domain_mode_env) != "1d_slab") {
@@ -3808,6 +3837,7 @@ int main(int argc, char** argv) {
       }
       domain_mode = grav3d::DomainMode::Slab1D;
     }
+#endif
     const bool split_profile = split_force_enabled && std::getenv("GRAV_SPLIT_PROFILE") &&
                                std::string(std::getenv("GRAV_SPLIT_PROFILE")) == "1";
     const int split_batch_warps = split_batch_env ? std::stoi(split_batch_env) : 16384;
@@ -3837,6 +3867,84 @@ int main(int argc, char** argv) {
         !std::isfinite(grav_eta_val) || grav_eta_val <= 0.f)
       throw std::runtime_error("Invalid physics or cosmology parameter");
 
+#ifdef GRAV_ENABLE_MPI
+    const double import_start = wall();
+    std::vector<std::vector<int>> can_peer;
+    std::array<uint64_t, grav3d::N_TOP_CELLS> init_cell_counts{};
+    double total_mass = 0.0, min_mass = DBL_MAX;
+    float first_mass = 0.f;
+    float first_soft_plummer = float(h.plummer_softening);
+    bool mass_uniform = true;
+    bool soft_uniform = true;
+    if (mpi_ctx.world_rank == 0) {
+      const uint64_t pos_offset = sizeof(StateInput);
+      const uint64_t vel_offset = pos_offset + N * sizeof(double3);
+      const uint64_t mass_offset = vel_offset + N * sizeof(float3);
+      const uint64_t chunk = std::min<uint64_t>(N, 16ULL << 20);
+      std::vector<double3> rx(chunk);
+      std::vector<float> rm(chunk), rs;
+      if (has_soft_in) rs.resize(chunk);
+      const double inv_wx = double(num_slabs) / h.box;
+      FILE* fx = fopen(argv[1], "rb");
+      FILE* fm = fopen(argv[1], "rb");
+      FILE* fs = has_soft_in ? fopen(soft_in_env, "rb") : nullptr;
+      if (!fx || !fm || (has_soft_in && !fs))
+        throw std::runtime_error("Failed reopening input for MPI Pass 1");
+      if (fs) {
+        if (fseeko(fs, 0, SEEK_END) != 0) throw std::runtime_error("Failed seeking GRAV_SOFT_IN");
+        if (ftello(fs) != off_t(N * sizeof(float))) throw std::runtime_error("GRAV_SOFT_IN size mismatch");
+        fseeko(fs, 0, SEEK_SET);
+      }
+      fseeko(fx, off_t(pos_offset), SEEK_SET);
+      fseeko(fm, off_t(mass_offset), SEEK_SET);
+      for (uint64_t base = 0; base < N; base += chunk) {
+        const size_t cnt = size_t(std::min<uint64_t>(chunk, N - base));
+        read_bin(fx, rx.data(), cnt);
+        read_bin(fm, rm.data(), cnt);
+        if (fs) read_bin(fs, rs.data(), cnt);
+        if (base == 0) {
+          first_mass = rm[0];
+          if (fs) first_soft_plummer = rs[0];
+        }
+        for (size_t k = 0; k < cnt; ++k) {
+          const double px = periodic ? wrapped_coord(rx[k].x, h.box) : rx[k].x;
+          const double py = periodic ? wrapped_coord(rx[k].y, h.box) : rx[k].y;
+          const double pz = periodic ? wrapped_coord(rx[k].z, h.box) : rx[k].z;
+          const int sx = std::min(std::max(int(px * inv_wx), 0), num_slabs - 1);
+          const int sy = std::min(std::max(int(py * inv_wx), 0), num_slabs - 1);
+          const int sz = std::min(std::max(int(pz * inv_wx), 0), num_slabs - 1);
+          ++init_cell_counts[(sx * num_slabs + sy) * num_slabs + sz];
+          const float mp = rm[k];
+          if (mp != first_mass) mass_uniform = false;
+          total_mass += double(mp);
+          if (mp > 0.f && double(mp) < min_mass) min_mass = double(mp);
+          if (fs) {
+            const float sp = rs[k];
+            if (!std::isfinite(sp) || sp <= 0.f) throw std::runtime_error("Invalid softening in GRAV_SOFT_IN");
+            if (sp != first_soft_plummer) soft_uniform = false;
+          }
+        }
+      }
+      fclose(fx); fclose(fm);
+      if (fs) fclose(fs);
+    }
+    fclose(input);
+    GRAV_MPI_CHECK(MPI_Bcast(init_cell_counts.data(), grav3d::N_TOP_CELLS, MPI_UNSIGNED_LONG_LONG, 0, mpi_ctx.world));
+    struct Pass1Scalars {
+      double total_mass, min_mass;
+      float first_mass, first_soft_plummer;
+      int mass_uniform, soft_uniform;
+    } p1s{total_mass, min_mass, first_mass, first_soft_plummer, mass_uniform ? 1 : 0, soft_uniform ? 1 : 0};
+    GRAV_MPI_CHECK(MPI_Bcast(&p1s, sizeof(p1s), MPI_BYTE, 0, mpi_ctx.world));
+    total_mass = p1s.total_mass;
+    min_mass = p1s.min_mass;
+    first_mass = p1s.first_mass;
+    first_soft_plummer = p1s.first_soft_plummer;
+    mass_uniform = (p1s.mass_uniform != 0);
+    soft_uniform = (p1s.soft_uniform != 0);
+    (void)dev_count;
+    {
+#else
     // Initialize GPUs & P2P matrix (slab vectors sized after Pass 1 load balancing)
     std::vector<GpuCtx> gpus(num_gpus);
     std::vector<std::vector<int>> can_peer(num_gpus, std::vector<int>(num_gpus, 0));
@@ -3966,6 +4074,7 @@ int main(int argc, char** argv) {
       }
       for (auto& G : gpus) G.cleanup();
       check(cudaSetDevice(0));
+#endif
 
       grav3d::Domain3DRunConfig d3cfg{};
       d3cfg.input_path = argv[1];
@@ -4041,9 +4150,18 @@ int main(int argc, char** argv) {
       d3cfg.lc_a_obs = lc_a_obs;
       d3cfg.lc_r_max_req = lc_r_max_req;
       d3cfg.lc_out_env = lc_out_env;
+#ifdef GRAV_ENABLE_MPI
+      d3cfg.pm_dist_enabled = true;
+      const int rc = grav3d::run_domain_3d_mpi_evolution(d3cfg, mpi_ctx, compute_slab_cap, compute_node_cap);
+      mpi_ctx.destroy();
+      MPI_Finalize();
+      return rc;
+#else
       return grav3d::run_domain_3d_evolution(d3cfg, compute_slab_cap, compute_node_cap);
+#endif
     }
 
+#ifndef GRAV_ENABLE_MPI
     // Optimal cyclic load balance (axis, offset, contiguous per-GPU slab counts) WITHOUT shifting coordinates
     int slab_axis = 0, slab_offset = 0;
     std::vector<int> gpu_slab_start(num_gpus, 0), gpu_slab_count(num_gpus, 0);
@@ -6517,8 +6635,12 @@ int main(int argc, char** argv) {
     }
 
     return sanity_bad ? 6 : 0;
+#endif
   } catch (const std::exception& e) {
     std::cerr << "Multi-GPU slab resident evolution failed: " << e.what() << std::endl;
+#ifdef GRAV_ENABLE_MPI
+    MPI_Abort(MPI_COMM_WORLD, 5);
+#endif
     return 5;
   }
 }

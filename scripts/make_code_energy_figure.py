@@ -56,9 +56,9 @@ def main():
         ("swift_cpu_256t", "CPU SWIFT\n(256T CPU)", CPU_SLATE),
         ("pkdgrav3_1g", "PKDGRAV3\n(1x A6000)", PURPLE),
         ("pkdgrav3_2g_mpi", "PKDGRAV3\n(2x A6000 MPI)", PKD_LIGHT),
-        ("grav_gpu_1g_3d_lazy", "grav-gpu\n(1x A6000 Lazy)", BLUE),
-        ("grav_gpu_2g_3d_lazy", "grav-gpu\n(2x A6000 Lazy)", GREEN),
-        ("grav_gpu_4g_3d_lazy", "grav-gpu\n(4x A6000 Lazy)", ORANGE),
+        ("grav_gpu_1g_3d_lazy", "gravityCU\n(1x A6000 Lazy)", BLUE),
+        ("grav_gpu_2g_3d_lazy", "gravityCU\n(2x A6000 Lazy)", GREEN),
+        ("grav_gpu_4g_3d_lazy", "gravityCU\n(4x A6000 Lazy)", ORANGE),
     ]
 
     labels = [s[1] for s in selected][::-1]
@@ -90,7 +90,7 @@ def main():
     for yi, r, col in zip(y, runs, colors):
         sp = t_swift_evo / r["evo_s"]
         is_best = r["id"] == "grav_gpu_4g_3d_lazy"
-        txt = f"{r['evo_s']:.1f}s evo / {r['wall_s']:.1f}s ({sp:.1f}x)" if r["code"] == "grav-gpu" else f"{r['evo_s']:.0f}s / {r['wall_s']:.0f}s ({sp:.2f}x)"
+        txt = f"{r['evo_s']:.1f}s evo / {r['wall_s']:.1f}s ({sp:.1f}x)" if r["code"] in ("grav-gpu", "gravityCU") else f"{r['evo_s']:.0f}s / {r['wall_s']:.0f}s ({sp:.2f}x)"
         ax_t.text(
             r["wall_s"] * 1.13, yi, txt,
             va="center", ha="left", fontsize=6.9,
@@ -160,8 +160,8 @@ def main():
     acc_items = [
         ("GADGET-4\n(128C CPU)", by_id["gadget4_128c"]["accuracy"]["p_delta_max_abs_dev"] * 100.0, CPU_DARK),
         ("PKDGRAV3\n(1G / 2G MPI)", by_id["pkdgrav3_2g_mpi"]["accuracy"]["p_delta_max_abs_dev"] * 100.0, PURPLE),
-        ("grav-gpu\n(1G / 2G / 4G Lazy)", by_id["grav_gpu_4g_3d_lazy"]["accuracy"]["p_delta_max_abs_dev"] * 100.0, ORANGE),
-        ("grav-gpu\n(2G / 4G Eager)", by_id["grav_gpu_4g_3d_eager"]["accuracy"]["p_delta_max_abs_dev"] * 100.0, BLUE),
+        ("gravityCU\n(1G / 2G / 4G Lazy)", by_id["grav_gpu_4g_3d_lazy"]["accuracy"]["p_delta_max_abs_dev"] * 100.0, ORANGE),
+        ("gravityCU\n(2G / 4G Eager)", by_id["grav_gpu_4g_3d_eager"]["accuracy"]["p_delta_max_abs_dev"] * 100.0, BLUE),
     ]
     acc_labels = [x[0] for x in acc_items][::-1]
     acc_vals = np.array([x[1] for x in acc_items][::-1])

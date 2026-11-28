@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="grav-gpu 是基于 CUDA/C++ 的单卡及多卡常驻显存宇宙学 TreePM 与 FoF 暗晕寻找引擎，支持 1024³ 粒子规模，与 SWIFT 及 Gadget-4 完成能量守恒与功率谱交叉验证。" />
+  <meta name="description" content="gravityCU（原 grav-gpu）是基于 CUDA/C++ 的单卡及多卡常驻显存宇宙学 TreePM 与 FoF 暗晕寻找引擎，支持 1024³ 粒子规模，与 SWIFT 及 Gadget-4 完成能量守恒与功率谱交叉验证。" />
   <meta name="author" content="Haina Huang" />
   <meta name="robots" content="index,follow" />
   <link rel="canonical" href="https://hainahuang729.github.io/grav-gpu/" />
@@ -11,12 +11,12 @@
   <link rel="alternate" hreflang="en" href="https://hainahuang729.github.io/grav-gpu/en.html" />
   <link rel="alternate" hreflang="x-default" href="https://hainahuang729.github.io/grav-gpu/en.html" />
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="grav-gpu — 多卡常驻显存 CUDA TreePM &amp; FoF 引擎" />
+  <meta property="og:title" content="gravityCU — 多卡常驻显存 CUDA TreePM &amp; FoF 引擎" />
   <meta property="og:description" content="CUDA/C++ 宇宙学 N 体引力求解器，支持 1024³ 粒子显存常驻演化与 SWIFT/Gadget-4 跨代码交叉校验。" />
   <meta property="og:url" content="https://hainahuang729.github.io/grav-gpu/" />
   <meta name="twitter:card" content="summary" />
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"grav-gpu","description":"Multi-GPU VRAM-resident CUDA TreePM and Friends-of-Friends cosmological N-body gravity solver validated up to 1024^3 particles against SWIFT and Gadget-4.","url":"https://hainahuang729.github.io/grav-gpu/","codeRepository":"https://github.com/HainaHuang729/grav-gpu","programmingLanguage":["CUDA","C++"],"author":{"@type":"Person","name":"Haina Huang","url":"https://formless-observatory.wuxiangguan.workers.dev/"}}</script>
-  <title>grav-gpu — 多卡常驻显存 CUDA TreePM &amp; FoF 引擎</title>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"gravityCU","alternateName":"grav-gpu","description":"Multi-GPU VRAM-resident CUDA TreePM and Friends-of-Friends cosmological N-body gravity solver validated up to 1024^3 particles against SWIFT and Gadget-4.","url":"https://hainahuang729.github.io/grav-gpu/","codeRepository":"https://github.com/HainaHuang729/grav-gpu","programmingLanguage":["CUDA","C++"],"author":{"@type":"Person","name":"Haina Huang","url":"https://formless-observatory.wuxiangguan.workers.dev/"}}</script>
+  <title>gravityCU — 多卡常驻显存 CUDA TreePM &amp; FoF 引擎</title>
   <style>
     :root {
       --bg: #f6f8fb;
@@ -369,13 +369,14 @@
   <div class="wrap">
     <header>
       <div>
-        <h1>grav-gpu</h1>
+        <h1>gravityCU</h1>
         <p class="subtitle">
-          100% 显存常驻的多卡 CUDA TreePM 与全 GPU FoF 宇宙学引力求解器，面向 4 × RTX A6000（NVLink）与 1024³ 十亿粒子级演化。
+          100% 显存常驻的多卡 CUDA TreePM 与全 GPU FoF 宇宙学引力求解器（原名 <code>grav-gpu</code>），面向 4 × RTX A6000（NVLink）与 1024³ 十亿粒子级演化，正推进高精度与多物理广度扩展。
         </p>
       </div>
       <div class="header-actions">
         <a class="lang-link" href="en.html">EN</a>
+        <a class="lang-link" href="https://github.com/HainaHuang729/grav-gpu/blob/main/ROADMAP.md" target="_blank" rel="noopener">路线图</a>
         <a class="repo-link" href="https://github.com/HainaHuang729/grav-gpu" target="_blank" rel="noopener">GitHub 仓库</a>
       </div>
     </header>
@@ -621,28 +622,28 @@
             <td class="num">基准 · 92, 17</td>
           </tr>
           <tr>
-            <td><strong>grav-gpu 1× A6000</strong>（3D Hilbert Lazy）</td>
+            <td><strong>gravityCU 1× A6000</strong>（3D Hilbert Lazy）</td>
             <td class="num">58.09 s / 50.03 s</td>
             <td class="num">241.3 W · <strong>3.93 Wh</strong></td>
             <td class="num"><strong>5.86 Wh</strong> (省 23.2×)</td>
             <td class="num"><span class="pill ok">0.0387%</span> · 92/92, 17/17</td>
           </tr>
           <tr>
-            <td><strong>grav-gpu 2× A6000</strong>（3D Hilbert Lazy）</td>
+            <td><strong>gravityCU 2× A6000</strong>（3D Hilbert Lazy）</td>
             <td class="num">33.11 s / 28.66 s</td>
             <td class="num">448.1 W · 4.17 Wh</td>
             <td class="num"><span class="pill best">5.27 Wh (省 25.8×)</span></td>
             <td class="num"><span class="pill ok">0.0387%</span> · 92/92, 17/17</td>
           </tr>
           <tr>
-            <td><strong>grav-gpu 4× A6000</strong>（3D Hilbert Eager）</td>
+            <td><strong>gravityCU 4× A6000</strong>（3D Hilbert Eager）</td>
             <td class="num">30.21 s / 21.07 s</td>
             <td class="num">635.2 W · 5.38 Wh</td>
             <td class="num">6.39 Wh (省 21.3×)</td>
             <td class="num"><span class="pill best">0.00106%</span> · 92/92, 17/17</td>
           </tr>
           <tr class="highlight">
-            <td><strong>grav-gpu 4× A6000</strong>（3D Hilbert Lazy）</td>
+            <td><strong>gravityCU 4× A6000</strong>（3D Hilbert Lazy）</td>
             <td class="num"><strong>28.26 s / 18.99 s</strong></td>
             <td class="num">662.7 W · 5.25 Wh</td>
             <td class="num"><strong>6.19 Wh</strong> (省 22.0–25.6×)</td>
@@ -666,7 +667,7 @@ python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_c
     </section>
 
     <footer>
-      <span>grav-gpu · 4 × NVIDIA RTX A6000 (NVLink4) vs. 256-Core CPU SWIFT</span>
+      <span>gravityCU · 4 × NVIDIA RTX A6000 (NVLink4) vs. 256-Core CPU SWIFT · <a href="https://github.com/HainaHuang729/grav-gpu/blob/main/ROADMAP.md" target="_blank" rel="noopener">精度与物理扩展路线图</a></span>
       <span>MIT License · Haina Huang (CUHK)</span>
     </footer>
   </div>
@@ -695,9 +696,9 @@ python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_c
           { name: "GADGET-4 (128C MPI · 451 W)", stat: "110.7 Wh · 883 s (1.2× 省)", pct: 81.3, color: "#475569" },
           { name: "PKDGRAV3 (1× A6000 · NVML 38.6 Wh)", stat: "106.7 Wh · 2043 s (1.3× 省)", pct: 78.3, color: "#94a3b8" },
           { name: "PKDGRAV3 (2× A6000 MPI · NVML 50.5 Wh)", stat: "94.9 Wh · 1333 s (1.4× 省)", pct: 69.7, color: "#64748b" },
-          { name: "grav-gpu 1× A6000 (NVML 3.93 Wh)", stat: "5.86 Wh · 58.1 s (省 23.2×)", pct: 4.3, color: "var(--cobalt)" },
-          { name: "grav-gpu 2× A6000 (NVML 4.17 Wh)", stat: "5.27 Wh · 33.1 s (省 25.8×)", pct: 3.9, color: "var(--emerald)" },
-          { name: "grav-gpu 4× A6000 (NVML 5.25 Wh)", stat: "6.19 Wh · 28.3 s (省 22.0×)", pct: 4.5, color: "var(--signal)" }
+          { name: "gravityCU 1× A6000 (NVML 3.93 Wh)", stat: "5.86 Wh · 58.1 s (省 23.2×)", pct: 4.3, color: "var(--cobalt)" },
+          { name: "gravityCU 2× A6000 (NVML 4.17 Wh)", stat: "5.27 Wh · 33.1 s (省 25.8×)", pct: 3.9, color: "var(--emerald)" },
+          { name: "gravityCU 4× A6000 (NVML 5.25 Wh)", stat: "6.19 Wh · 28.3 s (省 22.0×)", pct: 4.5, color: "var(--signal)" }
         ],
         metrics: [
           ["对比基准", "a9 同节点 256³ · a=0.855→0.92 · θ=0.70"],
@@ -775,7 +776,7 @@ python3 scripts/make_opt_comparison_figures.py &amp;&amp; python3 scripts/make_c
         src: "paper/figures/fig7_code_energy_comparison.png",
         pdf: "paper/figures/fig7_code_energy_comparison.pdf",
         alt: "跨代码时间、实测 NVML 能耗与精度对比图",
-        desc: "SWIFT、GADGET-4、PKDGRAV3（1G/2G MPI）与 grav-gpu（1G/2G/4G）在 256³ 相同物理参数下的总耗时、NVML 实测 GPU 能耗 + 整机建模能耗与功率谱偏差对比。"
+        desc: "SWIFT、GADGET-4、PKDGRAV3（1G/2G MPI）与 gravityCU（1G/2G/4G）在 256³ 相同物理参数下的总耗时、NVML 实测 GPU 能耗 + 整机建模能耗与功率谱偏差对比。"
       }
     };
 

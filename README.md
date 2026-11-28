@@ -1,8 +1,8 @@
-# `grav-gpu`: Multi-GPU VRAM-Resident CUDA TreePM + Full-GPU FoF Engine
+# `gravityCU`: Multi-GPU VRAM-Resident CUDA TreePM + Full-GPU FoF Engine
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Roadmap](https://img.shields.io/badge/Roadmap-Precision_%26_Physics_Breadth-008763.svg)](ROADMAP.md)
 
-`grav-gpu` is a multi-GPU CUDA TreePM cosmological gravity, lightcone, and Full-GPU Friends-of-Friends (FoF / Catalog / Spherical Overdensity) solver designed to evolve from $64^3$ smoke tests up to **$1024^3$ (`1,073,741,824`)** particles **100% resident inside GPU VRAM** (`4× NVIDIA RTX A6000`, `4 × 48 GiB`) without host-device swapping.
+`gravityCU` (formerly `grav-gpu`) is a multi-GPU CUDA TreePM cosmological gravity, lightcone, and Full-GPU Friends-of-Friends (FoF / Catalog / Spherical Overdensity) solver designed to evolve from $64^3$ smoke tests up to **$1024^3$ (`1,073,741,824`)** particles **100% resident inside GPU VRAM** (`4× NVIDIA RTX A6000`, `4 × 48 GiB`) without host-device swapping.
 
 ---
 
@@ -52,12 +52,12 @@ All codes below were benchmarked on the same `phy-gpus` node `a9` (`2× AMD EPYC
 | **PKDGRAV3 3.5.1** (`2× A6000 MPI`, `-np 2 -sz 16`) | `1333.2 s` / `1223.6 s` | `0.397` (`0.198/GPU`) | `50.45` (`136.2 W`) | `94.89` | `374.0` / `703.4` | `0.150%` (`91/92`, `17/17`) |
 | **GADGET-4** (`128` EPYC cores MPI TreePM) | `883.2 s` / `857.7 s` | `1.206` | — | `110.70` (`700W`: `171.7`) | — / `385.3` (`597.8`) | `0.187%` (`92/92`, `17/17`) |
 | **CPU SWIFT** (`256T` EPYC FMM+PM baseline) | `816.0 s` / `796.4 s` | `1.184` | — | `136.16` (`700W`: `158.7`) | — / `519.9` (`605.9`) | Reference (`92`, `17`) |
-| **`grav-gpu` `1× A6000`** (3D Hilbert Lazy) | `58.09 s` / `50.03 s` | `18.84` (`18.84/GPU`) | **`3.93`** (`241.3 W`) | `5.86` (`23.2×`) | **`15.01`** / `22.40` | `0.0387%` (`92/92`, `17/17`) |
-| **`grav-gpu` `2× A6000`** (3D Hilbert Lazy) | `33.11 s` / `28.66 s` | `32.88` (`16.44/GPU`) | `4.17` (`448.1 W`) | **`5.27`** (**`25.8×`**) | `15.93` / **`20.15`** | `0.0387%` (`92/92`, `17/17`) |
-| **`grav-gpu` `4× A6000`** (3D Hilbert Eager) | `30.21 s` / `21.07 s` | `44.74` (`11.19/GPU`) | `5.38` (`635.2 W`) | `6.39` (`21.3×`) | `20.54` / `24.39` | **`0.00106%`** (`92/92`, `17/17`) |
-| **`grav-gpu` `4× A6000`** (3D Hilbert Lazy) | **`28.26 s` / `18.99 s`** | **`49.62`** (`12.41/GPU`) | `5.25` (`662.7 W`) | `6.19` (`22.0–25.6×`) | `20.05` / `23.64` | `0.0387%` (`92/92`, `17/17`) |
+| **`gravityCU` `1× A6000`** (3D Hilbert Lazy) | `58.09 s` / `50.03 s` | `18.84` (`18.84/GPU`) | **`3.93`** (`241.3 W`) | `5.86` (`23.2×`) | **`15.01`** / `22.40` | `0.0387%` (`92/92`, `17/17`) |
+| **`gravityCU` `2× A6000`** (3D Hilbert Lazy) | `33.11 s` / `28.66 s` | `32.88` (`16.44/GPU`) | `4.17` (`448.1 W`) | **`5.27`** (**`25.8×`**) | `15.93` / **`20.15`** | `0.0387%` (`92/92`, `17/17`) |
+| **`gravityCU` `4× A6000`** (3D Hilbert Eager) | `30.21 s` / `21.07 s` | `44.74` (`11.19/GPU`) | `5.38` (`635.2 W`) | `6.39` (`21.3×`) | `20.54` / `24.39` | **`0.00106%`** (`92/92`, `17/17`) |
+| **`gravityCU` `4× A6000`** (3D Hilbert Lazy) | **`28.26 s` / `18.99 s`** | **`49.62`** (`12.41/GPU`) | `5.25` (`662.7 W`) | `6.19` (`22.0–25.6×`) | `20.05` / `23.64` | `0.0387%` (`92/92`, `17/17`) |
 
-> **Why PKDGRAV3 spends more wall time than `grav-gpu` at $256^3$**: PKDGRAV3 offloads FMM+Ewald gravity tiles to GPUs while rebuilding domain decompositions (`67×`, `425.95 s` on `1G` / `278.91 s` on `2G-MPI`) and CPU trees (`245×`, `522.19 s` / `145.87 s`) on host threads across `244` adaptive substeps (`3.3–5.6%` mean GPU utilization). Keeping all `16.78M` particles GPU-resident with TreePM + lazy Hilbert octree refits (`42.7–73.6%` GPU utilization) yields **`29×` faster wall time** and **`18–26×` lower whole-node energy**. On $1024^3$ full-history ($z=200\to0$), live `4× A6000` power measures `657.1–735.9 W`, reducing full-run node energy from `213.1 kWh` to `28.3–29.5 kWh` (`-86%`).
+> **Why PKDGRAV3 spends more wall time than `gravityCU` at $256^3$**: PKDGRAV3 offloads FMM+Ewald gravity tiles to GPUs while rebuilding domain decompositions (`67×`, `425.95 s` on `1G` / `278.91 s` on `2G-MPI`) and CPU trees (`245×`, `522.19 s` / `145.87 s`) on host threads across `244` adaptive substeps (`3.3–5.6%` mean GPU utilization). Keeping all `16.78M` particles GPU-resident with TreePM + lazy Hilbert octree refits (`42.7–73.6%` GPU utilization) yields **`29×` faster wall time** and **`18–26×` lower whole-node energy**. On $1024^3$ full-history ($z=200\to0$), live `4× A6000` power measures `657.1–735.9 W`, reducing full-run node energy from `213.1 kWh` to `28.3–29.5 kWh` (`-86%`).
 
 ![Cross-Code Runtime, Energy & Accuracy](paper/figures/fig7_code_energy_comparison.png)
 
@@ -159,45 +159,52 @@ All templates read `KERNEL_BUILD_DIR`, `DATA_DIR`, `CUDA_HOME`, `CXX_BIN`, and `
 ## Repository Structure
 
 ```text
-grav-gpu/
-├── Makefile                        # Turnkey build & smoke targets (fof, pm, cic, engine, smoke)
+gravityCU/                         # repo folder: grav-gpu
+├── Makefile                       # Turnkey build & smoke targets (fof, pm, pm-mpi, engine, mpi-engine, smoke)
+├── ROADMAP.md                     # Precision (P1-P3), Physics Breadth (B1-B4) & Deferred Exascale schedule
 ├── src/
-│   ├── multi_gpu_slab.cu           # Multi-GPU TreePM driver (1d_slab + 3D domain modes)
-│   ├── slab_resident.cu            # Single-GPU 12-slab baseline driver
-│   ├── grouped_force.cuh           # Morton tile grouped M2L/P2P force evaluation helpers
+│   ├── multi_gpu_slab.cu          # Multi-GPU TreePM driver (1d_slab + 3D domain + optional MPI modes)
+│   ├── slab_resident.cu           # Single-GPU 12-slab baseline driver
+│   ├── grouped_force.cuh          # Morton tile grouped M2L/P2P force evaluation helpers
 │   ├── grav_domain_3d.h           # 12×12×12 Hilbert / ORB partitioner & NVLink owner remapping
-│   ├── grav_domain_3d_engine.cuh  # Multi-GPU 3D domain execution engine & overlap pipeline
+│   ├── grav_domain_3d_engine.cuh  # Single-node 3D domain execution engine & overlap pipeline
+│   ├── grav_domain_3d_mpi.cuh     # Multi-node MPI 3D domain execution engine (compiled cleanly)
+│   ├── grav_mpi_comm.h            # MPI wrapper utilities & node topology helpers
 │   ├── grav_cuda_pm.cu/h          # Single-GPU cuFFT particle-mesh solver
-│   ├── grav_cuda_pm_dist.cu/h     # Pure-CUDA multi-GPU distributed FFT PM solver
+│   ├── grav_cuda_pm_dist.cu/h     # Pure-CUDA single-node distributed FFT PM solver
+│   ├── grav_cuda_pm_mpi.cu/h      # Multi-node MPI 1D-slab cuFFT + Alltoallv PM solver
 │   ├── grav_cuda_fof.cu/h         # Full-GPU FoF, slab merge, multi-GPU FoF, Catalog & SO solvers
-│   ├── make-evolution.py           # Instrumented GPU octree & M2P/M2L code generator
-│   └── cic_deposit.c               # Deterministic C99 CIC grid deposition helper
-├── tree/                           # Project-owned octree builder sources (used by make-evolution.py)
-├── m2p/                            # Project-owned M2P kernel port helpers (used by make-port.py)
+│   ├── make-evolution.py          # Instrumented GPU octree & M2P/M2L code generator
+│   └── cic_deposit.c              # Deterministic C99 CIC grid deposition helper
+├── tree/                          # Project-owned octree builder sources (used by make-evolution.py)
+├── m2p/                           # Project-owned M2P kernel port helpers (used by make-port.py)
 ├── scripts/
-│   ├── prepare_input.py      # General SWIFT HDF5 -> dense binary IC/snapshot converter
-│   ├── prepare_1024_input.py       # Legacy 1024^3 converter for archival scripts
-│   ├── make_smoke_ic.py            # Synthetic clustered periodic DM IC generator (numpy-only)
-│   ├── make_plummer_ic.py          # Equilibrium isolated Plummer sphere IC generator (energy/virial gate)
-│   ├── zeldovich_benchmark.py      # 1D EdS Zel'dovich plane-wave generator & analytical verifier
-│   ├── smoke_fof.py                # Standalone ctypes FoF + Catalog + SO parity smoke test
-│   ├── verify_smoke_e2e.py         # End-to-end smoke output & SO verifier
-│   ├── test_domain3d_smoke.cpp     # Standalone C++17 3D domain decomposition unit test
-│   ├── to-hdf5-from-source.py      # Dense .bin + .fof.bin -> SWIFT HDF5 + FOFGroups exporter
-│   ├── eval_1024_snapshot.py       # P(k), P_theta(k), halo mass function & kick-alignment analyzer
-│   ├── model_1024_full_history.py  # Full-history z=200->0 scaling & energy model
-│   ├── make_figures.py             # Manuscript figure generator (fig1-fig4)
+│   ├── prepare_input.py           # General SWIFT HDF5 -> dense binary IC/snapshot converter
+│   ├── prepare_1024_input.py      # Legacy 1024^3 converter for archival scripts
+│   ├── make_smoke_ic.py           # Synthetic clustered periodic DM IC generator (numpy-only)
+│   ├── make_plummer_ic.py         # Equilibrium isolated Plummer sphere IC generator (energy/virial gate)
+│   ├── zeldovich_benchmark.py     # 1D EdS Zel'dovich plane-wave generator & analytical verifier
+│   ├── smoke_fof.py               # Standalone ctypes FoF + Catalog + SO parity smoke test
+│   ├── verify_smoke_e2e.py        # End-to-end smoke output & SO verifier
+│   ├── test_domain3d_smoke.cpp    # Standalone C++17 3D domain decomposition & MultiNodeCommStats unit test
+│   ├── test_mpi_pm.cu             # Multi-node MPI PM FFT parity & latency benchmark
+│   ├── to-hdf5-from-source.py     # Dense .bin + .fof.bin -> SWIFT HDF5 + FOFGroups exporter
+│   ├── eval_1024_snapshot.py      # P(k), P_theta(k), halo mass function & kick-alignment analyzer
+│   ├── model_1024_full_history.py # Full-history z=200->0 scaling & energy model
+│   ├── make_figures.py            # Manuscript figure generator (fig1-fig4)
 │   ├── make_opt_comparison_figures.py # CPU-vs-GPU speed & accuracy comparison plots (fig5-fig6)
-│   └── make_code_energy_figure.py  # Cross-code runtime, NVML energy & accuracy plot (fig7)
-├── slurm/                          # Parameterized Slurm job templates
-├── reports/                        # Verified opt12..opt5 & code-energy-comparison JSONs, P(k) CSVs & native-092.time
-├── paper/                          # Physical Review D (revtex4-2) manuscript, BibTeX & figures
-└── index.html                      # Interactive benchmark & accuracy showcase page
+│   └── make_code_energy_figure.py # Cross-code runtime, NVML energy & accuracy plot (fig7)
+├── slurm/                         # Parameterized Slurm job templates (incl. mpi-multinode-test.sbatch)
+├── reports/                       # Verified opt12..opt5, code-energy, analytical gates & mpi-multinode-bench JSONs
+├── paper/                         # Physical Review D (revtex4-2) manuscript, BibTeX & figures
+└── index.html / en.html           # Interactive bilingual benchmark & accuracy showcase pages
 ```
 
 ---
 
 ## Roadmap
+
+For the full 18-week schedule, acceptance gates, and compute/storage tiers, see **[ROADMAP.md](ROADMAP.md)**.
 
 ### Completed (DMO Gravity + FoF Pipeline)
 - [x] Lazy octree refit, async lightcone host writes, and CUB migrant compaction
@@ -207,12 +214,18 @@ grav-gpu/
 - [x] Full-GPU FoF, cross-slab GPU merge, multi-GPU 3D inline FoF, Catalog, and SO (`M200c/R200c`, `M200m/R200m`)
 - [x] Pre-MPI & analytical physics gates ([reports/pre-mpi-physics-gate.json](reports/pre-mpi-physics-gate.json), [reports/analytical-physics-gates.json](reports/analytical-physics-gates.json)): 1D EdS Zel'dovich collapse ($64^3$, $a=0.02\to0.50$: $\Delta x_{\rm RMS}/L = 4.41\times 10^{-4}$, $\Delta v_{\rm RMS}/v_{\rm pk} = 0.592\%$), exact periodic Ewald $\theta$-convergence (short median $8.48\times 10^{-3} \to 1.14\times 10^{-4}$ across $\theta \in [0.9, 0.3]$; total median $1.98\times 10^{-3}$ at $\theta=0.7$), Layzer–Irvine energy (`3.07e-4`) & momentum (`3.72e-5`) across $z=200\to0$ ($526.6\text{ s}$, $9{,}257$ steps, $0.123\%$ $P_\delta(k)$, $18/18$ massive halos), 32K Plummer virial/energy (`1.15e-5`), and 4-GPU boundary force parity (`1.03e-4` median)
 
-### Planned Extensions
-- [ ] **Multi-Node MPI + GPU-Direct RDMA**: Extend 3D domain decomposition and distributed FFT PM across nodes to scale from $1024^3$ to $2048^3$–$4096^3$.
-- [ ] **SPH Hydrodynamics (`PartType0`)**: Port SPHENIX neighbor search, smoothing-length iteration, density loop, and hydro force/thermodynamics kernels to GPU.
-- [ ] **Baryonic Subgrid Physics (`PartType4/5`)**: Add radiative cooling, star formation, stellar/SN feedback, and black hole accretion/AGN feedback.
-- [ ] **Online Diagnostics & Direct I/O**: Compute $P_\delta(k)$ / $P_\theta(k)$ on-GPU during evolution and support direct C/CUDA HDF5 snapshot writes without `.bin` staging.
-- [ ] **Beyond-$\Lambda$CDM Physics**: Support massive neutrino species and modified-gravity force kernels.
+### In Progress (Phase 2 Multi-Node MPI Close-Out — [reports/mpi-multinode-bench.json](reports/mpi-multinode-bench.json))
+- [x] **Milestone 2A**: 3D domain MPI topology & contiguous Hilbert `MultiNodeCommStats` (`DOMAIN3D_SMOKE_PASSED`)
+- [x] **Milestone 2B (`np=2`)**: MPI 1D-slab cuFFT PM verified on `phy-gpus` (`b4`, RTX 4090, `np=2, side=128, N=64^3`: `max_rel_field=1.012e-14`, `max_rel_pot=3.177e-16`, `pm_comm_ms=90.875`, `MPI_PM_PASSED`)
+- [x] **Milestone 2C (Build)**: `test_mpi_pm`, `grav_mpi`, and `multi_gpu_slab` compiled cleanly on `phy-gpus` (`sm_89`, OpenMPI 4.1.6 + CUDA 12.6)
+- [ ] **Gates M1/M2/M3**: `1N×4R` / `2N` PM completion, $64^3$ 4-rank/2N parity vs. 1G, and $256^3$ multi-node scaling (`slurm/mpi-multinode-test.sbatch`, pending free GPUs on `phy-gpus`)
+
+### Prioritized Active Tracks (1–4× Lab GPUs, Weeks 2–18)
+- [ ] **Track 1 — Numerical Precision (`P1–P3`)**: High-order PM (**TSC/PCS + Interlacing** + $i\mathbf{k}$ spectral gradient, target Ewald total force `< 1e-4`), 5th-order multipoles / FMM `L2P` + FP64 `GRAV_PRECISION_MODE=high` (target `~1–3e-5` & Layzer–Irvine `< 1e-4`), and tidal/symplectic timestep refinement (Plummer drift `< 1e-6`).
+- [ ] **Track 2 — Physics Breadth (`B1–B4`)**: **$k$-space linear-response massive neutrinos** (`< 0.5%` match to CLASS/CAMB & GADGET-4/SWIFT), **GPU Monte Carlo SIDM** on resident octree leaves + $f(R)$ multigrid modified gravity, **multi-mass zoom-in** halos (`4096^3`–`8192^3` equivalent), and **Full-GPU Hydrodynamics (SPH/MFM + cooling)** validated on Sod, Sedov–Taylor, Kelvin–Helmholtz, and Santa Barbara cluster benchmarks.
+
+### Deferred Track (Exascale / 10k-GPU Infrastructure)
+- [ ] **Track 3 — Exascale Readiness (`S1–S4`, deferred)**: Dynamic $N_{\rm top} \propto G^{1/3}$ / ORB tree cuts (replacing static `12^3`), `cuFFTMp` / `heFFTe` 2D pencil FFT + `MPI_Alltoallv_c`, sparse neighborhood graph + LET pruning, `uint64_t` particle IDs, and parallel HDF5 / ADIOS2 async checkpointing.
 
 ---
 

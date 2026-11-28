@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=grav-gpu-smoke
+#SBATCH --job-name=gravityCU-smoke
 #SBATCH --partition=a
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=8

@@ -1,0 +1,45 @@
+{
+  "timestamp_utc": "2026-11-27T08:47:00Z",
+  "cluster": "phy-gpus",
+  "partition": "b",
+  "gpu_model": "NVIDIA GeForce RTX 4090 (sm_89)",
+  "mpi_stack": "OpenMPI 4.1.6 (/usr/bin/mpicxx, /usr/bin/mpirun) + CUDA 12.6 (HPC SDK 25.1)",
+  "milestone_2a_domain3d_smoke": {
+    "status": "passed",
+    "test": "scripts/test_domain3d_smoke.cpp",
+    "note": "Verified Hilbert3D/Orb3D domain planning and MultiNodeCommStats across 2x4 and 4x4 topologies (contiguous Hilbert rank assignment reduces inter-node ghost cells and particles vs round-robin)."
+  },
+  "milestone_2b_gate_m1_pm_mpi": {
+    "status": "partial_passed",
+    "side": 128,
+    "particles": 262144,
+    "box_mpc": 100.0,
+    "runs": [
+      {
+        "config": "1N x 2R (b4, 1 GPU shared)",
+        "ranks": 2,
+        "nodes": 1,
+        "max_rel_field": 1.012e-14,
+        "max_rel_pot": 3.177e-16,
+        "pm_comm_ms": 90.875,
+        "intra_node_ghost_cells": 712,
+        "inter_node_ghost_cells": 0,
+        "status": "passed"
+      }
+    ],
+    "pending_configs": ["1N x 4R", "2N x 1G", "2N x 2G"]
+  },
+  "milestone_2c_build": {
+    "status": "passed",
+    "targets": ["test_mpi_pm", "grav_mpi", "multi_gpu_slab"],
+    "note": "All 3 targets compiled cleanly on phy-gpus with nvcc -arch=sm_89 -ccbin=/usr/bin/mpicxx."
+  },
+  "milestone_2d_gate_m2_parity_64": {
+    "status": "pending_cluster_gpus",
+    "reason": "All 51 online GPUs across partitions a (15/15), b (32/32), and c (4/4) are currently allocated."
+  },
+  "milestone_2d_gate_m3_scaling_256": {
+    "status": "pending_cluster_gpus",
+    "reason": "All 51 online GPUs across partitions a, b, and c are currently allocated."
+  }
+}

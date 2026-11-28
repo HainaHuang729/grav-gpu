@@ -798,4 +798,49 @@ inline Domain3DPlan build_domain_3d_plan(
       counts, weights, cell_owner, num_gpus, mode, pm_side, chosen_rot, nullptr);
 }
 
+struct MultiNodeCommStats {
+  uint64_t intra_node_ghost_cells = 0;
+  uint64_t inter_node_ghost_cells = 0;
+  uint64_t intra_node_ghost_parts = 0;
+  uint64_t inter_node_ghost_parts = 0;
+  int intra_node_peer_edges = 0;
+  int inter_node_peer_edges = 0;
+  double inter_node_cell_fraction = 0.0;
+};
+
+inline MultiNodeCommStats compute_multinode_comm_stats(
+    const Domain3DPlan& plan,
+    const std::vector<int>& rank_to_node,
+    const std::array<uint64_t, N_TOP_CELLS>* counts = nullptr) {
+  MultiNodeCommStats s;
+  const int G = int(plan.export_cells.size());
+  for (int src = 0; src < G; ++src) {
+    const int n_src = (src < int(rank_to_node.size())) ? rank_to_node[src] : 0;
+    for (int dst = 0; dst < G; ++dst) {
+      if (src == dst || plan.export_cells[src][dst].empty()) continue;
+      const int n_dst = (dst < int(rank_to_node.size())) ? rank_to_node[dst] : 0;
+      const bool same = (n_src == n_dst);
+      const uint64_t n_cells = uint64_t(plan.export_cells[src][dst].size());
+      uint64_t n_parts = 0;
+      if (counts != nullptr) {
+        for (int cid : plan.export_cells[src][dst]) n_parts += (*counts)[cid];
+      }
+      if (same) {
+        s.intra_node_ghost_cells += n_cells;
+        s.intra_node_ghost_parts += n_parts;
+        s.intra_node_peer_edges += 1;
+      } else {
+        s.inter_node_ghost_cells += n_cells;
+        s.inter_node_ghost_parts += n_parts;
+        s.inter_node_peer_edges += 1;
+      }
+    }
+  }
+  const uint64_t tot = s.intra_node_ghost_cells + s.inter_node_ghost_cells;
+  if (tot > 0) {
+    s.inter_node_cell_fraction = double(s.inter_node_ghost_cells) / double(tot);
+  }
+  return s;
+}
+
 } // namespace grav3d
