@@ -114,11 +114,18 @@
 - **插件目录与配置绑定**：在 `plugins/` 下提供模板插件（如自定义暗物质截面、自定义暗能量 $w(z)$、自定义外场势、自定义在线诊断），在 `--config run.ini` 中通过 `[plugins] enable = ...` 动态启用。
 - **TreePM + SPH 彻底合流**：将 [src/grav_cosmo_hydro.cu](src/grav_cosmo_hydro.cu) 的 `PartType0` 气体粒子直接合入 [src/multi_gpu_slab.cu](src/multi_gpu_slab.cu) 的短程八叉树 + 3D 域分解主循环，使流体也能享受短程树分辨率、多质量 Zoom-in 与在线 FoF。
 
-### 6.2 天体化学网络与辐射冷却（Chemistry & Cooling）
+### 6.2 天体化学网络、辐射冷却与外部库渐进移植（CHIMES / Grackle / SWIFT 生态）
 
-- **非平衡原初化学网络（GPU 求解器）**：在现有 Sutherland–Dopita 查表冷却基础上，引入 6–9 物种原初化学网络（$\text{H}, \text{H}^+, \text{He}, \text{He}^+, \text{He}^{++}, e^-, \text{H}_2, \text{H}^-, \text{H}_2^+$），采用 GPU 隐式 BDF / Rosenbrock 子步积分，支持第一代恒星（Pop III）与低金属度矮星系冷却。
-- **UV 背景光致电离与自屏蔽**：接入 Haardt & Madau (2012) / Faucher-Giguère (2020) 随红移演化的光致电离加热率 $\Gamma(z)$ 与 Rahmati+2013 氢自屏蔽修正。
-- **金属丰度追踪与金属线冷却**：为气体与恒星粒子增加多元素金属质量分数数组（总金属度 $Z$ 及 $\text{C}, \text{N}, \text{O}, \text{Mg}, \text{Si}, \text{Fe}$），对接 `Grackle` / `CHIMES` / `Ploeckinger & Schaye` 查表式金属线冷却与尘埃冷却。
+参考 SWIFT 的“可替换物理槽位 + 外部 C 库对接”模式，按**不破坏 100% GPU 显存常驻优势**的原则分步移植：
+
+1. **阶段一（路线 A — GPU 查表常驻 + 可选 CPU 插件槽位）**：
+   - 直接加载 **CHIMES**（Richings+2014）预计算的 HDF5 平衡冷却/电离表（与 COLIBRE / Ploeckinger & Schaye 2020 同源）常驻 GPU 显存做 $O(1)$ 查表，零 CPU 拷回；
+   - 预留可选编译开关（`GRAV_WITH_CHIMES=1`、`GRAV_WITH_GRACKLE=1`、`GRAV_WITH_VELOCIRAPTOR=1`），允许主机 OpenMP 线程池直接调用原生 C API。
+2. **阶段二（路线 B — COLIBRE 同款 `hybrid-chimes` 混合模式）**：
+   - 弥散 IGM 与高温晕气全部留在 GPU 查表；仅将冷密 ISM / 分子云气体（通常仅占总气体 `1%–5%`）打包回 CPU 调用原生 CHIMES（SUNDIALS CVODE，157 物种非平衡化学），兼顾分子化学精度与 GPU 吞吐。
+3. **阶段三（路线 C — 纯 GPU-native 化学与辐射转移）**：
+   - 对接 **SUNDIALS CVODE CUDA 批处理后端** 或 GPU 原生 6–9 物种原初网络（$\text{H}/\text{He}/\text{H}_2/e^-$）+ 简化 C/O 分子网络；
+   - 接入 Haardt–Madau UV 光致电离背景、Rahmati+2013 氢自屏蔽、多元素金属丰度追踪（$\text{C},\text{N},\text{O},\text{Mg},\text{Si},\text{Fe}$），并按需逐步移植 `GEAR-RT` / `SPH-M1RT` 辐射转移。
 
 ### 6.3 重子演化与星系形成次网格物理（Galaxy & Baryon Evolution）
 
