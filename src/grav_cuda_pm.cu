@@ -96,7 +96,7 @@ __device__ double inverse_sinc(int mode, int n) {
 }
 
 __global__ void filter(cufftDoubleComplex* modes, int n, double box,
-                       double split, int order, size_t count) {
+                       double split, int order, GravNuStepParams nu, size_t count) {
   const size_t i=size_t(blockIdx.x)*blockDim.x+threadIdx.x;
   if (i>=count) return;
   if (i==0) {
@@ -117,7 +117,11 @@ __global__ void filter(cufftDoubleComplex* modes, int n, double box,
 #endif
   const double cic=inverse_sinc(kx,n)*inverse_sinc(ky,n)*inverse_sinc(kz,n);
   const double deconv=grav_pm_deconv_weight(cic, order);
-  const double weight=(-1./(pi*box))*window/(k2+FLT_MIN)*deconv;
+  double weight=(-1./(pi*box))*window/(k2+FLT_MIN)*deconv;
+  if (nu.enabled) {
+    const double k_phys = (2.0 * pi / box) * sqrt(k2);
+    weight *= grav_nu_pm_boost(k_phys, nu);
+  }
   modes[i].x*=weight;
   modes[i].y*=weight;
 }
@@ -390,7 +394,7 @@ void enqueue_transform(Workspace& w,int side,double box,double split,cudaStream_
   const auto cfg = grav_pm_get_config();
   const size_t modes=size_t(side)*side*(side/2+1);
   check(cufftExecD2Z(w.forward,w.potential,w.modes));
-  filter<<<blocks(modes),block_size,0,stream>>>(w.modes,side,box,split,cfg.order,modes);
+  filter<<<blocks(modes),block_size,0,stream>>>(w.modes,side,box,split,cfg.order,grav_nu_get_step_params(),modes);
   check(cufftExecZ2D(w.reverse,w.modes,w.potential));
 }
 
@@ -548,7 +552,7 @@ extern "C" void grav_pm_cuda_solve_on_device(double* d_density, void* d_field_do
   const size_t modes_cnt=size_t(side)*side*(side/2+1);
   const size_t points=size_t(side)*side*side;
   check(cufftExecD2Z(sw.forward,d_density,sw.modes));
-  filter<<<blocks(modes_cnt),block_size,0,stream>>>(sw.modes,side,box,split,cfg.order,modes_cnt);
+  filter<<<blocks(modes_cnt),block_size,0,stream>>>(sw.modes,side,box,split,cfg.order,grav_nu_get_step_params(),modes_cnt);
   if (cfg.spectral_grad) {
     auto* field = static_cast<double4*>(d_field_double4);
     const double two_pi_over_box = 2.0 * pi / box;

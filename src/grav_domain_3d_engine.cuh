@@ -1556,11 +1556,17 @@ inline int run_domain_3d_evolution(
   const double inv_cell_w = double(N_TOP) / h.box;
 
   const GravPmConfig pm_cfg = grav_pm_get_config();
+  const GravNuConfig nu_cfg = grav_nu_init_from_env(cfg.cosmo_h0, cfg.cosmo_om);
   const int pm_halo_lo = grav_pm_x_halo_lo(pm_cfg.order, pm_cfg.interlace);
   const int pm_halo_hi = grav_pm_x_halo_hi(pm_cfg.order, pm_cfg.interlace);
-  std::printf("PM_CONFIG order=%d interlace=%d grad=%s asmth=%.4f halo=[-%d,+%d]\n",
+  std::printf("PM_CONFIG order=%d interlace=%d grad=%s asmth=%.4f rcut=%.2f high_prec=%d halo=[-%d,+%d]\n",
               pm_cfg.order, pm_cfg.interlace, pm_cfg.spectral_grad ? "ik" : "fd4",
-              pm_cfg.asmth, pm_halo_lo, pm_halo_hi);
+              pm_cfg.asmth, pm_cfg.rcut_ratio, pm_cfg.high_precision, pm_halo_lo, pm_halo_hi);
+  if (nu_cfg.sum_m_nu_ev > 0.0) {
+    std::printf("NEUTRINO_CONFIG sum_m_nu_ev=%.4f n_species=%d omega_nu0=%.6g f_nu=%.6g table=%s\n",
+                nu_cfg.sum_m_nu_ev, nu_cfg.n_species, nu_cfg.omega_nu0, nu_cfg.f_nu,
+                nu_cfg.table_path.empty() ? "linear_response_analytic" : nu_cfg.table_path.c_str());
+  }
   std::fflush(stdout);
 
   std::array<double, N_TOP_CELLS> init_weights{};
@@ -1800,13 +1806,14 @@ inline int run_domain_3d_evolution(
   const double r_s = pm_cfg.asmth * h.box / double(pm_side);
 
   Physics p{knots[0], log_span,
-      float(h.box), float(r_s), float(4.5 * r_s), cfg.grav_G,
+      float(h.box), float(r_s), float(pm_cfg.rcut_ratio * r_s), cfg.grav_G,
       timeline / cfg.pm_intervals, timeline / cfg.short_intervals, cfg.step_factor, cfg.mac,
       cfg.dt_max_val, std::min(r_s, d_dm), cfg.max_rms_fac, cfg.dynamic_pm,
       cfg.cosmo_h0, cfg.cosmo_om, cfg.cosmo_ode, cfg.cosmo_or, cfg.cosmo_ok, cfg.cosmo_w0, cfg.cosmo_wa,
       cfg.theta_val, cfg.grav_eta_val,
       true, cfg.comoving,
-      0.f, 1.f, 0.f, 0.f, 0.f};
+      0.f, 1.f, 0.f, 0.f, 0.f,
+      nu_cfg.omega_nu0, nu_cfg.m_each_ev};
   const double potential_norm = cfg.periodic
       ? (4.0 * acos(-1.0) * cfg.total_mass * double(p.split) * double(p.split) / (h.box * h.box * h.box))
       : 0.0;
@@ -2685,6 +2692,8 @@ inline int run_domain_3d_evolution(
         // ================= STEP B: Distributed PM =================
         if (is_pm_step) {
           const double t_pm0 = wall();
+          if (g == 0) grav_nu_update_step(a, H_cur);
+#pragma omp barrier
           if (cfg.pm_dist_enabled) {
             dist_pm.begin_deposit(g);
             if (G.ns > 0) {

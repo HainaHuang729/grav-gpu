@@ -4,12 +4,15 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include "grav_neutrino.cuh"
 
 struct GravPmConfig {
-  int order = 2;          // 2 = CIC (default), 3 = TSC, 4 = PCS
-  int interlace = 0;      // 0 = single grid (default), 1 = symmetric half-cell interlacing
-  int spectral_grad = 0;  // 0 = 4th-order FD (default), 1 = exact -i*k spectral gradient
-  double asmth = 1.25;    // r_s / dx split ratio (default 1.25 = SWIFT)
+  int order = 2;           // 2 = CIC (default), 3 = TSC, 4 = PCS
+  int interlace = 0;       // 0 = single grid (default), 1 = symmetric half-cell interlacing
+  int spectral_grad = 0;   // 0 = 4th-order FD (default), 1 = exact -i*k spectral gradient
+  double asmth = 1.25;     // r_s / dx split ratio (default 1.25 = SWIFT)
+  double rcut_ratio = 4.5; // r_cut / r_s short-range cutoff (default 4.5 = SWIFT, 5.5 in high precision)
+  int high_precision = 0;  // 1 when GRAV_PRECISION_MODE=high (FP64 accum + exact erfc + PCS/int/ik defaults)
 };
 
 namespace grav_pm_detail {
@@ -24,9 +27,16 @@ inline bool& runtime_cfg_overridden() {
   return flag;
 }
 
-inline int parse_order_env() {
+inline int parse_high_precision_env() {
+  const char* s = std::getenv("GRAV_PRECISION_MODE");
+  if (!s || !*s) return 0;
+  return (std::strcmp(s, "high") == 0 || std::strcmp(s, "HIGH") == 0 ||
+          std::strcmp(s, "fp64") == 0 || std::strcmp(s, "1") == 0) ? 1 : 0;
+}
+
+inline int parse_order_env(int high_prec) {
   const char* s = std::getenv("GRAV_PM_ORDER");
-  if (!s || !*s) return 2;
+  if (!s || !*s) return high_prec ? 4 : 2;
   if (std::strcmp(s, "cic") == 0 || std::strcmp(s, "CIC") == 0) return 2;
   if (std::strcmp(s, "tsc") == 0 || std::strcmp(s, "TSC") == 0) return 3;
   if (std::strcmp(s, "pcs") == 0 || std::strcmp(s, "PCS") == 0) return 4;
@@ -34,14 +44,15 @@ inline int parse_order_env() {
   return (v == 3 || v == 4) ? v : 2;
 }
 
-inline int parse_interlace_env() {
+inline int parse_interlace_env(int high_prec) {
   const char* s = std::getenv("GRAV_PM_INTERLACE");
-  return (s && *s && std::atoi(s) != 0) ? 1 : 0;
+  if (!s || !*s) return high_prec ? 1 : 0;
+  return (std::atoi(s) != 0) ? 1 : 0;
 }
 
-inline int parse_grad_env() {
+inline int parse_grad_env(int high_prec) {
   const char* s = std::getenv("GRAV_PM_GRAD");
-  if (!s || !*s) return 0;
+  if (!s || !*s) return high_prec ? 1 : 0;
   if (std::strcmp(s, "ik") == 0 || std::strcmp(s, "IK") == 0 ||
       std::strcmp(s, "spectral") == 0 || std::strcmp(s, "1") == 0) {
     return 1;
@@ -56,6 +67,13 @@ inline double parse_asmth_env() {
   return (std::isfinite(v) && v > 0.1 && v < 10.0) ? v : 1.25;
 }
 
+inline double parse_rcut_env(int high_prec) {
+  const char* s = std::getenv("GRAV_PM_RCUT");
+  if (!s || !*s) return high_prec ? 5.5 : 4.5;
+  double v = std::atof(s);
+  return (std::isfinite(v) && v >= 3.0 && v <= 8.0) ? v : (high_prec ? 5.5 : 4.5);
+}
+
 }  // namespace grav_pm_detail
 
 inline GravPmConfig grav_pm_get_config() {
@@ -63,10 +81,12 @@ inline GravPmConfig grav_pm_get_config() {
     return grav_pm_detail::runtime_cfg_storage();
   }
   GravPmConfig cfg;
-  cfg.order = grav_pm_detail::parse_order_env();
-  cfg.interlace = grav_pm_detail::parse_interlace_env();
-  cfg.spectral_grad = grav_pm_detail::parse_grad_env();
+  cfg.high_precision = grav_pm_detail::parse_high_precision_env();
+  cfg.order = grav_pm_detail::parse_order_env(cfg.high_precision);
+  cfg.interlace = grav_pm_detail::parse_interlace_env(cfg.high_precision);
+  cfg.spectral_grad = grav_pm_detail::parse_grad_env(cfg.high_precision);
   cfg.asmth = grav_pm_detail::parse_asmth_env();
+  cfg.rcut_ratio = grav_pm_detail::parse_rcut_env(cfg.high_precision);
   return cfg;
 }
 

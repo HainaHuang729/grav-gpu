@@ -137,7 +137,12 @@ Ready-to-use `monofonIC` (2LPT/3LPT) and `MUSIC` (Zoom-in multi-mass) templates 
 | `GRAV_PM_ORDER` | `2` (`cic`) | PM mass-assignment / interpolation order: `2` (`cic`), `3` (`tsc`), or `4` (`pcs`) with matched $\text{sinc}^{-2p}$ deconvolution |
 | `GRAV_PM_INTERLACE` | `0` | Set `1` for symmetric half-cell interlaced PM (cancels odd aliases while preserving zero self-force & momentum conservation) |
 | `GRAV_PM_GRAD` | `fd4` | PM force gradient operator: `fd4` (4th-order finite difference, SWIFT default) or `ik` (exact $-i\mathbf{k}$ spectral gradient) |
-| `GRAV_PM_ASMTH` | `1.25` | TreePM split scale ratio $r_s/\Delta x$ (default `1.25` matches SWIFT; also scales short-range cutoff $4.5\,r_s$) |
+| `GRAV_PM_ASMTH` | `1.25` | TreePM split scale ratio $r_s/\Delta x$ (default `1.25` matches SWIFT; also scales short-range cutoff `GRAV_PM_RCUT * r_s`) |
+| `GRAV_PM_RCUT` | `4.5` (`5.5` in `high`) | Short-range TreePM cutoff ratio $r_{\rm cut}/r_s$ (default `4.5`; `5.5` under `GRAV_PRECISION_MODE=high`) |
+| `GRAV_PRECISION_MODE` | `standard` | Set `high` to enable high-precision gravity (`PCS + Interlacing + -ik`, `rcut=5.5`, exact `erfc/exp`, `mac=1e-4`, `theta=0.25`, no lazy tree; achieves `1.01e-5` Ewald median force error and `0.038%` Zel'dovich RMS) |
+| `GRAV_NU_MASS_EV` | `0.0` | Total neutrino mass $\sum m_\nu$ in eV (`> 0` activates $k$-space linear-response neutrino boost $W_\nu(k,a)$ & Komatsu+2011 Fermi–Dirac background $H(a)$ with zero extra VRAM) |
+| `GRAV_NU_NSPECIES` | `3` | Number of degenerate massive neutrino species when `GRAV_NU_MASS_EV > 0` |
+| `GRAV_NU_TABLE` | unset | Optional 2D `(a, k [1/Mpc], R_nu)` ASCII/CSV transfer table from `CLASS`/`CAMB` (resampled to 256 log-$k$ GPU bins per step) |
 | `GRAV_SPLIT_FORCE` | `1` (periodic) | Split traversal / M2P / M2L / P2P kernels (required for 3D domain modes) |
 | `GRAV_LAZY_TREE` | `1` (periodic) | Lazy node refit across active sub-steps |
 | `GRAV_REBALANCE_INTERVAL` | `8` | Rebalance cadence in steps for 3D domains (`0` disables live rebalancing) |

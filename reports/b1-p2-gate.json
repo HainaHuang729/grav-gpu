@@ -1,0 +1,129 @@
+{
+  "generated_at": "2026-11-28",
+  "cluster": "phy-gpus (node b4, NVIDIA GeForce RTX 4090, CUDA 12.6, OpenMPI 4.1.6)",
+  "gate_p2_high_precision": {
+    "status": "PASSED",
+    "mode": "GRAV_PRECISION_MODE=high (PCS order=4 + symmetric interlacing + spectral -ik gradient + rcut=5.5*r_s + exact erfc/exp + mac=1e-4 + lazy_tree=off)",
+    "ewald_convergence_4096": {
+      "slurm_job_id": 492176,
+      "pm_grid": 128,
+      "asmth": 1.25,
+      "rcut_ratio": 5.5,
+      "baseline_cic_fd4_theta030_total_med_rel": 0.001034,
+      "p1_pcs_int_ik_theta030_total_med_rel": 5.582e-05,
+      "runs": [
+        {
+          "theta": 0.30,
+          "step0_short_med_rel": 8.5655e-05,
+          "step0_total_med_rel": 4.2946e-05,
+          "step8_short_med_rel": 1.8247e-05,
+          "step8_total_med_rel": 1.0187e-05,
+          "step8_total_p95_rel": 1.0378e-04,
+          "step8_total_max_rel": 1.3983e-03,
+          "wall_ms": 1225.33
+        },
+        {
+          "theta": 0.25,
+          "step0_short_med_rel": 6.2686e-05,
+          "step0_total_med_rel": 2.9413e-05,
+          "step8_short_med_rel": 1.8220e-05,
+          "step8_total_med_rel": 1.0174e-05,
+          "step8_total_p95_rel": 1.0378e-04,
+          "step8_total_max_rel": 1.3992e-03,
+          "wall_ms": 1222.67
+        },
+        {
+          "theta": 0.20,
+          "step0_short_med_rel": 4.8229e-05,
+          "step0_total_med_rel": 2.0716e-05,
+          "step8_short_med_rel": 1.8252e-05,
+          "step8_total_med_rel": 1.0135e-05,
+          "step8_total_p95_rel": 1.0357e-04,
+          "step8_total_max_rel": 1.3990e-03,
+          "wall_ms": 1222.20
+        }
+      ],
+      "improvement_vs_baseline": "102.0x (1.034e-3 -> 1.014e-5)",
+      "improvement_vs_p1": "5.5x (5.582e-5 -> 1.014e-5)"
+    },
+    "zeldovich_64_cubed": {
+      "slurm_job_id": 492178,
+      "n_particles": 262144,
+      "box_mpc": 37.114,
+      "a_init": 0.02,
+      "a_end": 0.50,
+      "a_cross": 1.0,
+      "pos_rms_mpc": 0.0011287,
+      "pos_rms_over_box": 3.0411e-05,
+      "pos_rms_over_amp": 0.00038215,
+      "vel_rms_km_s": 0.20818,
+      "vel_rms_over_vpeak": 0.00073994,
+      "vel_transverse_rms_km_s": 0.002947,
+      "baseline_pos_rms_over_amp": 0.00554,
+      "baseline_vel_rms_over_vpeak": 0.00592,
+      "pos_improvement_vs_baseline": "14.5x (0.554% -> 0.0382%)",
+      "vel_improvement_vs_baseline": "8.0x (0.592% -> 0.0740%)"
+    }
+  },
+  "gate_b1_massive_neutrinos": {
+    "status": "PASSED",
+    "unit_test": {
+      "binary": "scripts/test_neutrino_b1.cpp",
+      "fd_background_max_rel_vs_quadrature": 0.0021598,
+      "analytic_boost_k0": 1.023033,
+      "analytic_boost_k0_target": 1.023033,
+      "analytic_boost_kinf": 1.0,
+      "result": "NEUTRINO_B1_UNIT_TESTS_PASSED"
+    },
+    "gpu_3scale_free_streaming": {
+      "slurm_job_id": 492179,
+      "cosmology": {
+        "Omega_m": 0.3153,
+        "Omega_DE": 0.6847,
+        "h": 0.6736,
+        "sum_m_nu_ev": 0.30,
+        "n_species": 3,
+        "omega_nu0": 0.00709873,
+        "f_nu": 0.0225142,
+        "k_fs_a05_inv_mpc": 0.02462
+      },
+      "a_init": 0.02,
+      "a_end": 0.50,
+      "a_cross": 5.0,
+      "scales": [
+        {
+          "regime": "super_free_streaming (k << k_fs)",
+          "box_mpc": 10000.0,
+          "k_inv_mpc": 0.0006283,
+          "P_cb_ratio_sim": 0.998532,
+          "P_cb_ratio_ode": 0.998808,
+          "rel_err_pct": 0.0277,
+          "P_m_ratio_sim": 0.998503,
+          "P_m_ratio_ode": 0.998779
+        },
+        {
+          "regime": "transition (k ~ 0.25 k_fs)",
+          "box_mpc": 1000.0,
+          "k_inv_mpc": 0.006283,
+          "P_cb_ratio_sim": 0.974354,
+          "P_cb_ratio_ode": 0.974439,
+          "rel_err_pct": 0.0088,
+          "P_m_ratio_sim": 0.971674,
+          "P_m_ratio_ode": 0.971759
+        },
+        {
+          "regime": "deep_free_streaming (k >> k_fs)",
+          "box_mpc": 20.0,
+          "k_inv_mpc": 0.314159,
+          "P_cb_ratio_sim": 0.929530,
+          "P_cb_ratio_ode": 0.929282,
+          "rel_err_pct": 0.0267,
+          "P_m_ratio_sim": 0.888396,
+          "P_m_ratio_ode": 0.888158
+        }
+      ],
+      "max_rel_err_pct": 0.0277,
+      "gate_threshold_pct": 0.5
+    }
+  }
+}

@@ -88,6 +88,7 @@ struct Physics {
   float theta, grav_eta;
   bool periodic, comoving;
   float ext_M, ext_a, ext_cx, ext_cy, ext_cz;
+  double omega_nu = 0.0, nu_m_each_ev = 0.0;
   __host__ __device__ double scale(Tick ti) const {
     return comoving ? (a_begin * exp(log_span * (double(ti) / timeline))) : 1.0;
   }
@@ -104,7 +105,12 @@ struct Physics {
     if (w0 != -1.0 || wa != 0.0) {
       de_fac = pow(a, -3.0 * (1.0 + w0 + wa)) * exp(-3.0 * wa * (1.0 - a));
     }
-    return hubble0 * sqrt(omega_r * a4 + omega_m * a3 + omega_k * a2 + omega_de * de_fac);
+    double matter_term = omega_m * a3;
+    if (omega_nu > 0.0) {
+      const double om_cb = omega_m - omega_nu;
+      matter_term = om_cb * a3 + omega_nu * a3 * grav_nu_rho_enhancement(a, nu_m_each_ev);
+    }
+    return hubble0 * sqrt(omega_r * a4 + matter_term + omega_k * a2 + omega_de * de_fac);
   }
   __host__ __device__ double factors(Tick lo, Tick hi, bool drift) const {
     if (lo == hi) return 0.0;
@@ -3797,8 +3803,10 @@ int main(int argc, char** argv) {
         throw std::runtime_error("GRAV_SLAB_OFFSET must be auto or 0..11");
     }
 
+    const GravPmConfig pm_cfg_init = grav_pm_get_config();
+    const bool high_prec = pm_cfg_init.high_precision != 0;
     const float step_factor = requested_step ? std::stof(requested_step) : 1.f;
-    const float mac = requested_mac ? std::stof(requested_mac) : tolerance;
+    const float mac = requested_mac ? std::stof(requested_mac) : (high_prec ? 1e-4f : tolerance);
     const float grav_G = requested_g ? std::stof(requested_g) : grav_G_default;
     const double dt_max_val = requested_dt_max ? std::stod(requested_dt_max) : (comoving ? dt_max_default : 0.0);
     const double max_rms_fac = requested_rms_fac ? std::stod(requested_rms_fac) : max_dt_RMS_factor_default;
@@ -3810,12 +3818,13 @@ int main(int argc, char** argv) {
     const double cosmo_ok = om_k_env ? std::stod(om_k_env) : 0.0;
     const double cosmo_w0 = w0_env ? std::stod(w0_env) : -1.0;
     const double cosmo_wa = wa_env ? std::stod(wa_env) : 0.0;
-    const float theta_val = theta_env ? std::stof(theta_env) : theta_default;
+    const GravNuConfig nu_cfg = grav_nu_init_from_env(cosmo_h0, cosmo_om);
+    const float theta_val = theta_env ? std::stof(theta_env) : (high_prec ? 0.25f : theta_default);
     const float grav_eta_val = grav_eta_env ? std::stof(grav_eta_env) : grav_eta_default;
     const int leaf_limit = leaf_override ? std::stoi(leaf_override) : 64;
     const bool warp_m2l = !m2l_env || std::string(m2l_env) != "0";
-    const bool fast_split = !fsplit_env || std::string(fsplit_env) != "0";
-    const bool lazy_tree_enabled = periodic && (!lazy_env || std::string(lazy_env) != "0");
+    const bool fast_split = fsplit_env ? (std::string(fsplit_env) != "0") : !high_prec;
+    const bool lazy_tree_enabled = periodic && (lazy_env ? (std::string(lazy_env) != "0") : !high_prec);
     const bool split_force_enabled = periodic && (!split_force_env || std::string(split_force_env) != "0");
     const bool pm_dist_enabled = periodic && (num_gpus > 1) && (!pm_dist_env || std::string(pm_dist_env) != "0");
     const int rebalance_interval = rebal_interval_env ? std::stoi(rebal_interval_env) : 8;
@@ -4483,9 +4492,14 @@ int main(int argc, char** argv) {
     const int pm_halo_lo = grav_pm_x_halo_lo(pm_cfg.order, pm_cfg.interlace);
     const int pm_halo_hi = grav_pm_x_halo_hi(pm_cfg.order, pm_cfg.interlace);
     if (periodic) {
-      std::printf("PM_CONFIG order=%d interlace=%d grad=%s asmth=%.4f halo=[-%d,+%d]\n",
+      std::printf("PM_CONFIG order=%d interlace=%d grad=%s asmth=%.4f rcut=%.2f high_prec=%d halo=[-%d,+%d]\n",
                   pm_cfg.order, pm_cfg.interlace, pm_cfg.spectral_grad ? "ik" : "fd4",
-                  pm_cfg.asmth, pm_halo_lo, pm_halo_hi);
+                  pm_cfg.asmth, pm_cfg.rcut_ratio, pm_cfg.high_precision, pm_halo_lo, pm_halo_hi);
+      if (nu_cfg.sum_m_nu_ev > 0.0) {
+        std::printf("NEUTRINO_CONFIG sum_m_nu_ev=%.4f n_species=%d omega_nu0=%.6g f_nu=%.6g table=%s\n",
+                    nu_cfg.sum_m_nu_ev, nu_cfg.n_species, nu_cfg.omega_nu0, nu_cfg.f_nu,
+                    nu_cfg.table_path.empty() ? "linear_response_analytic" : nu_cfg.table_path.c_str());
+      }
       std::fflush(stdout);
     }
 
@@ -4528,13 +4542,14 @@ int main(int argc, char** argv) {
     const double r_s = pm_cfg.asmth * h.box / double(pm_side);
     const double3 ext_c_perm = permute_in(ext_c_orig, slab_axis);
     Physics p{knots[0], log_span,
-        float(h.box), periodic ? float(r_s) : 1e30f, periodic ? float(4.5 * r_s) : 1e30f, grav_G,
+        float(h.box), periodic ? float(r_s) : 1e30f, periodic ? float(pm_cfg.rcut_ratio * r_s) : 1e30f, grav_G,
         timeline / pm_intervals, timeline / short_intervals, step_factor, mac,
         dt_max_val, std::min(r_s, d_dm), max_rms_fac, dynamic_pm,
         cosmo_h0, cosmo_om, cosmo_ode, cosmo_or, cosmo_ok, cosmo_w0, cosmo_wa,
         theta_val, grav_eta_val,
         periodic, comoving,
-        ext_M_val, ext_a_val, float(ext_c_perm.x), float(ext_c_perm.y), float(ext_c_perm.z)};
+        ext_M_val, ext_a_val, float(ext_c_perm.x), float(ext_c_perm.y), float(ext_c_perm.z),
+        nu_cfg.omega_nu0, nu_cfg.m_each_ev};
     if (comoving) {
       const double Ha0 = p.H(h.initial_scale);
       const double Ha1 = p.H(a_end);
@@ -5451,6 +5466,8 @@ int main(int argc, char** argv) {
         // ================= STEP B: Multi-GPU Resident PM =================
         if (periodic && is_pm_step) {
           const double t_pm0 = wall();
+          if (g == 0) grav_nu_update_step(a, H_cur);
+#pragma omp barrier
           const int pm_passes = pm_cfg.interlace ? 2 : 1;
           const float pm_scale = pm_cfg.interlace ? 0.5f : 1.0f;
           for (int pm_pass = 0; pm_pass < pm_passes; ++pm_pass) {
