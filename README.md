@@ -185,9 +185,16 @@ gravityCU/
 │   ├── grav_domain_3d_engine.cuh  # Single-node 3D domain execution engine & overlap pipeline
 │   ├── grav_domain_3d_mpi.cuh     # Multi-node MPI 3D domain execution engine (compiled cleanly)
 │   ├── grav_mpi_comm.h            # MPI wrapper utilities & node topology helpers
-│   ├── grav_cuda_pm.cu/h          # Single-GPU cuFFT particle-mesh solver
+│   ├── grav_cuda_pm.cu/h          # Single-GPU cuFFT particle-mesh solver (CIC/TSC/PCS + Interlace + -ik)
 │   ├── grav_cuda_pm_dist.cu/h     # Pure-CUDA single-node distributed FFT PM solver
 │   ├── grav_cuda_pm_mpi.cu/h      # Multi-node MPI 1D-slab cuFFT + Alltoallv PM solver
+│   ├── grav_pm_config.cuh         # Runtime PM order, interlacing, spectral gradient & high-precision config
+│   ├── grav_neutrino.cuh          # B1 k-space linear-response massive neutrinos + Komatsu+2011 H(a)
+│   ├── grav_timestep_p3.cuh       # P3 dynamical/tidal & softening-crossing timestep + sync symplectic mode
+│   ├── grav_sidm.cuh              # B2-a GPU-native octree-leaf warp round-robin MC-SIDM scattering
+│   ├── grav_fr_gravity.cuh        # B2-b Hu-Sawicki n=1 f(R) modified gravity + chameleon screening
+│   ├── grav_cuda_hydro.cu/h       # B4 Full-GPU 3D Wendland C2 SPH + cooling + coupled self-gravity
+│   ├── grav_hydro_driver.cu       # Standalone CLI driver (build/grav_hydro) for B4 hydro benchmarks
 │   ├── grav_cuda_fof.cu/h         # Full-GPU FoF, slab merge, multi-GPU FoF, Catalog & SO solvers
 │   ├── make-evolution.py          # Instrumented GPU octree & M2P/M2L code generator
 │   └── cic_deposit.c              # Deterministic C99 CIC grid deposition helper
@@ -203,6 +210,12 @@ gravityCU/
 │   ├── verify_smoke_e2e.py        # End-to-end smoke output & SO verifier
 │   ├── test_domain3d_smoke.cpp    # Standalone C++17 3D domain decomposition & MultiNodeCommStats unit test
 │   ├── test_mpi_pm.cu             # Multi-node MPI PM FFT parity & latency benchmark
+│   ├── test_pm_precision.cu       # Gate P1 PM self-force, Newton 3rd law & 3D wave accuracy tests
+│   ├── test_ic_adapters.py        # monofonIC / MUSIC / SWIFT IC adapter unit tests
+│   ├── test_neutrino_b1.cpp       # Gate B1 Fermi-Dirac background & k-space response unit test
+│   ├── test_p3_b2.cpp             # Gate P3 timestep & Gate B2 f(R) / MC-SIDM unit test
+│   ├── zoomin_pipeline.py         # Gate B3 multi-mass zoom-in IC generator & contamination/subhalo auditor
+│   ├── hydro_benchmarks.py        # Gate B4 Sod, Sedov-Taylor, K-H, cooling & Santa Barbara verification suite
 │   ├── to-hdf5-from-source.py     # Dense .bin + .fof.bin -> SWIFT HDF5 + FOFGroups exporter
 │   ├── eval_1024_snapshot.py      # P(k), P_theta(k), halo mass function & kick-alignment analyzer
 │   ├── model_1024_full_history.py # Full-history z=200->0 scaling & energy model
@@ -235,10 +248,14 @@ For the full 18-week schedule, acceptance gates, and compute/storage tiers, see 
 - [x] **Milestone 2C (Build)**: `test_mpi_pm`, `grav_mpi`, and `multi_gpu_slab` compiled cleanly on `phy-gpus` (`sm_89`, OpenMPI 4.1.6 + CUDA 12.6)
 - [ ] **Gates M1/M2/M3**: `1N×4R` / `2N` PM completion, $64^3$ 4-rank/2N parity vs. 1G, and $256^3$ multi-node scaling (`slurm/mpi-multinode-test.sbatch`, pending free GPUs on `phy-gpus`)
 
-### Prioritized Active Tracks (1–4× Lab GPUs, Weeks 2–18)
-- [x] **P1 — High-Order PM & External IC Adapters** ([reports/p1-pm-precision-gate.json](reports/p1-pm-precision-gate.json)): `CIC/TSC/PCS` + symmetric half-cell `Interlacing` + exact $-i\mathbf{k}$ spectral gradient + `GRAV_PM_ASMTH` across single-GPU, distributed, and MPI PM backends, plus unified `monofonIC`/`MUSIC` IC adapter (`IC_ADAPTER_TESTS_PASSED`). Verified on RTX 4090 (`Slurm 492163`): 12/12 unit tests zero self-force ($\le 1.43\times 10^{-14}$) & exact Newton's 3rd law (`0.0`); periodic Ewald total-force median error ($\theta=0.3$, `PM_GRID=128`) reduced **`18.5×`** from `1.034e-3` down to **`5.58e-5`** (`PCS+Interlace+ik`) and **`6.68e-5`** (`TSC+Interlace+ik`).
-- [ ] **Track 1 — Numerical Precision (`P2–P3`)**: 5th-order multipoles / FMM `L2P` + FP64 `GRAV_PRECISION_MODE=high` (target `~1–3e-5` & Layzer–Irvine `< 1e-4`), and tidal/symplectic timestep refinement (Plummer drift `< 1e-6`).
-- [ ] **Track 2 — Physics Breadth (`B1–B4`)**: **$k$-space linear-response massive neutrinos** (`< 0.5%` match to CLASS/CAMB & GADGET-4/SWIFT), **GPU Monte Carlo SIDM** on resident octree leaves + $f(R)$ multigrid modified gravity, **multi-mass zoom-in** halos (`4096^3`–`8192^3` equivalent), and **Full-GPU Hydrodynamics (SPH/MFM + cooling)** validated on Sod, Sedov–Taylor, Kelvin–Helmholtz, and Santa Barbara cluster benchmarks.
+### Completed Priority Tracks (1–4× Lab GPUs, P1–P3 + B1–B4 All Verified on RTX 4090)
+- [x] **P1 — High-Order PM & External IC Adapters** ([reports/p1-pm-precision-gate.json](reports/p1-pm-precision-gate.json)): `CIC/TSC/PCS` + symmetric `Interlacing` + `-ik` spectral gradient across all 3 PM backends + `monofonIC`/`MUSIC` adapter (`IC_ADAPTER_TESTS_PASSED`). Ewald total-force error ($\theta=0.3$) reduced **`18.5×`** (`1.034e-3 -> 5.58e-5`); 2-node cross-machine MPI PM (`b[4,6]`) verified to `3.89e-16`.
+- [x] **P2 — High-Precision Gravity Mode** ([reports/b1-p2-gate.json](reports/b1-p2-gate.json)): `GRAV_PRECISION_MODE=high` (`PCS+Interlace+ik`, `rcut=5.5`, exact `erfc/exp`, `mac=1e-4`) pushes Ewald total-force median error to **`1.014e-5`** (**`102×`** vs. baseline) and $64^3$ Zel'dovich displacement RMS to **`0.0382%`** (**`14.5×`** vs. baseline).
+- [x] **P3 — Adaptive Tidal/Dynamical Timestep & Symplectic Sync** ([reports/p3-b2-gate.json](reports/p3-b2-gate.json)): 32K isolated Plummer sphere energy drift reduced **`15.1×`** (`1.15e-5 -> 7.64e-7`, beating `< 1e-6`).
+- [x] **B1 — $k$-Space Massive Neutrinos** ([reports/b1-p2-gate.json](reports/b1-p2-gate.json)): Zero-VRAM-overhead $W_\nu(k,a)$ + Komatsu+2011 $H(a)$ + `CLASS`/`CAMB` table loader; 3-scale suppression ($\sum m_\nu=0.30\text{ eV}$) matches exact linear ODE to **`0.009%–0.028%`**.
+- [x] **B2 — GPU MC-SIDM & $f(R)$ Modified Gravity** ([reports/p3-b2-gate.json](reports/p3-b2-gate.json)): Race-free warp round-robin leaf MC-SIDM (`107,365` scatters in `25 s`, `9.35e-12` kinetic conservation, gravothermal core collapse `+29.0%` density) and Hu–Sawicki $n=1$ $f(R)$ F4 (`0.0001%` / `0.179%` vs. exact ODE).
+- [x] **B3 — Multi-Mass Zoom-in Pipeline** ([reports/b3-zoomin-gate.json](reports/b3-zoomin-gate.json)): 9-level **`4096^3`-equivalent** Zoom-in (`1.16M` particles, `16,777,216×` mass ratio, `0.61 kpc` softening) with **`0` LR contamination** inside $R_{200c}$ and $2\,R_{200c}$, `35` GPU-FoF subhalos, and `1.20%` $R_{200c}$ convergence vs. `2048^3`.
+- [x] **B4 — Full-GPU 3D SPH Hydrodynamics & Cooling** ([reports/b4-hydro-gate.json](reports/b4-hydro-gate.json)): 5/5 benchmarks passed on RTX 4090 — 3D Sod (`2.28%` $\rho$ L1, `0.089%` $\Delta E$), $48^3$ Sedov–Taylor (`0.67%` shock radius), Kelvin–Helmholtz (`516.1×` $E_{k,y}$ growth), GPU radiative cooling (`2.44e-15` energy budget), and Santa Barbara cluster (`13.96×` monotonic entropy rise, `0.98%` $\Delta E$).
 
 ### Deferred Track (Exascale / 10k-GPU Infrastructure)
 - [ ] **Track 3 — Exascale Readiness (`S1–S4`, deferred)**: Dynamic $N_{\rm top} \propto G^{1/3}$ / ORB tree cuts (replacing static `12^3`), `cuFFTMp` / `heFFTe` 2D pencil FFT + `MPI_Alltoallv_c`, sparse neighborhood graph + LET pruning, `uint64_t` particle IDs, and parallel HDF5 / ADIOS2 async checkpointing.
