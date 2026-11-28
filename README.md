@@ -77,7 +77,7 @@ python3 scripts/make_figures.py
 
 - **CUDA Toolkit >= 12.x** (`nvcc` + `libcufft`), `g++` (C++17 + OpenMP), `make`, and Python 3 with `numpy` (+ `h5py` for HDF5 conversion).
 - **For building the full gravity & PM targets (`make engine pm`)**: a configured upstream GPU SWIFT source/build directory `KERNEL_BUILD_DIR` containing `config.h` and `src/{runner_gpu.h,runner_gpu.c,gpu_gravity_offload.cu,gpu_gravity_functions.cuh,kernel_gravity.h,kernel_long_gravity.h,gravity_derivatives.h,multipole.h}` (upstream GPLv3 headers are intentionally not vendored in this MIT repository).
-- **Standalone CUDA FoF / C99 CIC / 3D Domain targets (`make fof cic test-domain3d test-fof`) require zero upstream SWIFT headers.**
+- **Standalone CUDA FoF / C99 CIC / 3D Domain / Full-GPU Hydro targets (`make fof cic hydro test-domain3d test-fof`) require zero upstream SWIFT headers.**
 
 ### Option A: Zero-Dependency Standalone Build & FoF GPU Smoke Test
 

@@ -59,6 +59,11 @@ $(BUILD_DIR):
 
 fof: $(BUILD_DIR)/grav_cuda_fof.so
 
+$(BUILD_DIR)/grav_hydro: src/grav_hydro_driver.cu src/grav_cuda_hydro.cu src/grav_cuda_hydro.h | $(BUILD_DIR)
+	$(NVCC) $(NVCC_COMMON) -Isrc src/grav_hydro_driver.cu src/grav_cuda_hydro.cu -o $@
+
+hydro: $(BUILD_DIR)/grav_hydro
+
 $(BUILD_DIR)/grav_cuda_fof.so: src/grav_cuda_fof.cu src/grav_cuda_fof.h | $(BUILD_DIR)
 	$(NVCC) $(NVCC_COMMON) -Xcompiler "-fPIC -fopenmp" -shared -Isrc src/grav_cuda_fof.cu -o $@
 

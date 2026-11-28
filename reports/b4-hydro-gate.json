@@ -1,0 +1,71 @@
+{
+  "generated_at": "2026-11-28",
+  "cluster": "phy-gpus (node b4, NVIDIA GeForce RTX 4090, CUDA 12.6)",
+  "status": "PASSED (5/5 benchmarks)",
+  "solver": "src/grav_cuda_hydro.cu (3D Wendland C2 SPH, GPU spatial-hash neighbor list with periodic cell deduplication, adaptive h_i + grad-h Omega_i, Monaghan viscosity + Balsara switch, Price thermal conduction, implicit subcycled Sutherland-Dopita cooling, coupled GPU direct self-gravity)",
+  "benchmarks": {
+    "sod_shock_tube_3d": {
+      "slurm_job_id": 492193,
+      "n_gas": 12740,
+      "t_end": 0.15,
+      "steps": 274,
+      "wall_s": 2.14,
+      "max_rel_dE": 0.0008904,
+      "rho_L1_rel": 0.02283,
+      "P_L1_rel": 0.02562,
+      "vx_L1_rel": 0.02537,
+      "passed": true
+    },
+    "sedov_taylor_3d": {
+      "slurm_job_id": 492193,
+      "n_gas": 110592,
+      "grid": "48^3",
+      "t_end": 0.06,
+      "steps": 213,
+      "wall_s": 11.41,
+      "R_shock_sim": 0.37125,
+      "R_shock_exact": 0.37376,
+      "R_shock_rel_err": 0.006706,
+      "rho_peak": 2.327,
+      "max_rel_dE": 0.03513,
+      "passed": true
+    },
+    "kelvin_helmholtz_2d3d": {
+      "slurm_job_id": 492189,
+      "n_gas": 24576,
+      "t_end": 1.5,
+      "steps": 3070,
+      "wall_s": 36.57,
+      "E_ky_init": 1.298e-06,
+      "E_ky_final": 6.700e-04,
+      "E_ky_growth_factor": 516.13,
+      "passed": true
+    },
+    "radiative_cooling_gpu": {
+      "slurm_job_id": 492189,
+      "n_gas": 1728,
+      "t_end": 1.0,
+      "steps": 13,
+      "wall_s": 0.24,
+      "u_init": 1.0,
+      "u_floor": 0.01,
+      "u_final_median": 0.01,
+      "E_rad_lost": 0.99,
+      "energy_budget_max_rel_dE": 2.442e-15,
+      "passed": true
+    },
+    "santa_barbara_adiabatic_cluster": {
+      "slurm_job_id": 492189,
+      "n_gas": 4096,
+      "n_dm": 4096,
+      "t_end": 3.5,
+      "steps": 636,
+      "wall_s": 38.75,
+      "max_rel_dE": 0.009809,
+      "core_u_shock_heated": 0.7693,
+      "entropy_outer_over_inner": 13.96,
+      "entropy_slope_dlnK_dlnr": 1.686,
+      "passed": true
+    }
+  }
+}
